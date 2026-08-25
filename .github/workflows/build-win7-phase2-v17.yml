@@ -1,0 +1,37 @@
+name: Build shadPS4 Win7 Phase 2 V17 Baseline
+
+on:
+  push:
+    branches: [Pre-release-shadPS4-win7-phase2-sharedmem]
+    paths:
+      - run-win7-phase2-ci.ps1
+      - phase2-v17-payload/**
+      - apply-launcher-dark-theme.ps1
+      - ci-payload/**
+      - .github/workflows/build-win7-phase2-v17.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-win7-x64:
+    name: Build Windows 7 x64 V17 Baseline
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout build controller
+        uses: actions/checkout@v4
+
+      - name: Build exact Windows 7 Phase 2 V17 baseline
+        shell: pwsh
+        run: .\run-win7-phase2-ci.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE\artifact"
+
+      - name: Upload Windows 7 runnable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadps4-win7-phase2-v17-baseline-7fb1a530
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
