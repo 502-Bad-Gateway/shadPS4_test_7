@@ -16,7 +16,10 @@ if ($InputHash -ne $ExpectedInputSha256) {
 }
 
 $Text = [IO.File]::ReadAllText($SourcePath)
+$Text = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
 function Replace-Exact([string]$Old, [string]$New, [string]$Label) {
+    $Old = $Old.Replace("`r`n", "`n").Replace("`r", "`n")
+    $New = $New.Replace("`r`n", "`n").Replace("`r", "`n")
     if (!$script:Text.Contains($Old)) { throw "Launcher theme anchor missing: $Label" }
     $script:Text = $script:Text.Replace($Old, $New)
 }
