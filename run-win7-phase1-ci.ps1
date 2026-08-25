@@ -11,6 +11,7 @@ $ChunkDir = Join-Path $PSScriptRoot 'ci-payload'
 $PayloadZip = Join-Path $PSScriptRoot 'phase1-ci-payload.zip'
 $CoreScript = Join-Path $PSScriptRoot 'build-win7-phase1.ps1'
 $PatchedCoreScript = Join-Path $PSScriptRoot 'build-win7-phase1-ci-runtime.ps1'
+$LauncherThemePatch = Join-Path $PSScriptRoot 'launcher-dark-theme.patch'
 
 Write-Host '=== Reconstructing audited Phase-1 CI payload ==='
 $Chunks = @(Get-ChildItem -Path $ChunkDir -File -Filter 'part*.txt' | Sort-Object Name)
@@ -31,13 +32,56 @@ Write-Host "Payload SHA256: $ActualHash"
 if ($ActualHash -ne $ExpectedPayloadSha256) {
     throw "Reconstructed payload hash mismatch; expected $ExpectedPayloadSha256"
 }
+if (!(Test-Path $LauncherThemePatch)) {
+    throw "Launcher theme patch not found: $LauncherThemePatch"
+}
 
 $CoreText = Get-Content -Raw $CoreScript
 if (!$CoreText.Contains($OldCorruptPayloadSha256)) {
     throw 'Core controller no longer contains the expected stale payload hash; refusing an uncontrolled edit.'
 }
 $CoreText = $CoreText.Replace($OldCorruptPayloadSha256, $ExpectedPayloadSha256)
+
+$OldLauncherSetup = @'
+$LauncherSource = Join-Path $PayloadDir 'launcher-source'
+$JsonDir = Join-Path $LauncherSource 'third_party\nlohmann'
+'@
+$NewLauncherSetup = @'
+$LauncherSource = Join-Path $PayloadDir 'launcher-source'
+Push-Location $PayloadDir
+try {
+    git apply -p0 --check $LauncherThemePatch
+    if ($LASTEXITCODE -ne 0) { throw 'launcher dark-theme patch check failed' }
+    git apply -p0 $LauncherThemePatch
+    if ($LASTEXITCODE -ne 0) { throw 'launcher dark-theme patch failed' }
+} finally {
+    Pop-Location
+}
+$JsonDir = Join-Path $LauncherSource 'third_party\nlohmann'
+'@
+if (!$CoreText.Contains($OldLauncherSetup)) {
+    throw 'Launcher setup block changed unexpectedly; refusing an uncontrolled edit.'
+}
+$CoreText = $CoreText.Replace($OldLauncherSetup, $NewLauncherSetup)
+
+$OldToolPaths = @'
+$CC = Join-Path $Bin 'x86_64-w64-mingw32-clang.exe'
+$CXX = Join-Path $Bin 'x86_64-w64-mingw32-clang++.exe'
+$Windres = Join-Path $Bin 'x86_64-w64-mingw32-windres.exe'
+if (!(Test-Path $Windres)) { $Windres = Join-Path $Bin 'llvm-windres.exe' }
+'@
+$NewToolPaths = @'
+$CC = (Join-Path $Bin 'x86_64-w64-mingw32-clang.exe').Replace('\', '/')
+$CXX = (Join-Path $Bin 'x86_64-w64-mingw32-clang++.exe').Replace('\', '/')
+$Windres = (Join-Path $Bin 'x86_64-w64-mingw32-windres.exe').Replace('\', '/')
+if (!(Test-Path $Windres)) { $Windres = (Join-Path $Bin 'llvm-windres.exe').Replace('\', '/') }
+'@
+if (!$CoreText.Contains($OldToolPaths)) {
+    throw 'LLVM-MinGW tool path block changed unexpectedly; refusing an uncontrolled edit.'
+}
+$CoreText = $CoreText.Replace($OldToolPaths, $NewToolPaths)
+
 [IO.File]::WriteAllText($PatchedCoreScript, $CoreText, [Text.UTF8Encoding]::new($false))
 
-Write-Host 'Payload verified. Starting the actual Windows 7 target build controller.'
+Write-Host 'Payload verified. Launcher dark theme staged. Starting the actual Windows 7 target build controller.'
 & $PatchedCoreScript -OutputDirectory $OutputDirectory
