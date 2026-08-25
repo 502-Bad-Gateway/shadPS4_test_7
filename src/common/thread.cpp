@@ -20,6 +20,7 @@
 #elif defined(_WIN32)
 #include <windows.h>
 #include "common/string_util.h"
+#include "common/windows_compat.h"
 #else
 #if defined(__Bitrig__) || defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <pthread_np.h>
@@ -177,11 +178,11 @@ void SetCurrentThreadName(const char* name) {
     if (Libraries::Kernel::g_curthread) {
         Libraries::Kernel::g_curthread->name = name;
     }
-    SetThreadDescription(GetCurrentThread(), UTF8ToUTF16W(name).data());
+    Windows::SetThreadDescription(GetCurrentThread(), UTF8ToUTF16W(name).data());
 }
 
 void SetThreadName(void* thread, const char* name) {
-    SetThreadDescription(thread, UTF8ToUTF16W(name).data());
+    Windows::SetThreadDescription(thread, UTF8ToUTF16W(name).data());
 }
 
 #else // !_WIN32, so must be POSIX threads
@@ -255,9 +256,13 @@ std::string GetCurrentThreadName() {
         return g_curthread->name;
     }
 #ifdef _WIN32
-    PWSTR name;
-    GetThreadDescription(GetCurrentThread(), &name);
-    return Common::UTF16ToUTF8(name);
+    PWSTR name{};
+    if (Windows::GetThreadDescription(GetCurrentThread(), &name)) {
+        const std::string result = Common::UTF16ToUTF8(name);
+        LocalFree(name);
+        return result;
+    }
+    return "<unknown name>";
 #else
     char name[256];
     if (pthread_getname_np(pthread_self(), name, sizeof(name)) != 0) {

@@ -1,0 +1,32 @@
+#include <winver.h>
+
+1 24 "launcher.manifest"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Unofficial shadPS4 Windows 7 project\0"
+            VALUE "FileDescription", "shadPS4 Windows 7 Launcher\0"
+            VALUE "FileVersion", "1.0.0\0"
+            VALUE "InternalName", "shadps4-win7-launcher\0"
+            VALUE "LegalCopyright", "GPL-2.0-or-later\0"
+            VALUE "OriginalFilename", "shadps4-win7-launcher.exe\0"
+            VALUE "ProductName", "shadPS4 Windows 7 Launcher\0"
+            VALUE "ProductVersion", "1.0.0\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

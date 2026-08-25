@@ -12,6 +12,7 @@
 #include "save_backup.h"
 #include "save_instance.h"
 
+#include "common/exit.h"
 #include "common/io_file.h"
 #include "common/logging/formatter.h"
 #include "common/logging/log.h"
@@ -183,7 +184,7 @@ void StartThread() {
     g_backup_thread = std::jthread{BackupThreadBody};
     static std::once_flag flag;
     std::call_once(flag, [] {
-        std::at_quick_exit([] {
+        Common::AtQuickExit([] {
             StopThread();
             while (GetWorkerStatus() != WorkerStatus::NotStarted) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));

@@ -7,6 +7,7 @@
 #include <SDL3/SDL_events.h>
 #include <imgui.h>
 
+#include "common/exit.h"
 #include "common/path_util.h"
 #include "core/debug_state.h"
 #include "core/devtools/layer.h"
@@ -139,7 +140,7 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& w
         GetIO().FontGlobalScale *= dpi;
     }
 
-    std::at_quick_exit([] { SaveIniSettingsToDisk(GetIO().IniFilename); });
+    Common::AtQuickExit([] { SaveIniSettingsToDisk(GetIO().IniFilename); });
 }
 
 void OnResize() {

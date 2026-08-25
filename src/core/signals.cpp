@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <atomic>
 #include "common/arch.h"
 #include "common/assert.h"
 #include "common/decoder.h"
+#include "common/error.h"
+#include "common/exit.h"
 #include "common/signal_context.h"
+#include "common/string_util.h"
 #include "core/cpu_patches.h" // Windows static guest red-zone protection
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/threads/exception.h"
@@ -13,6 +17,9 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+#include <dbghelp.h>
+#endif
 static constexpr DWORD MS_VC_EXCEPTION = 0x406D1388;
 #else
 #include <csignal>
@@ -25,6 +32,151 @@ static constexpr DWORD MS_VC_EXCEPTION = 0x406D1388;
 namespace Core {
 
 #if defined(_WIN32)
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+namespace {
+
+std::atomic_flag crash_dump_started = ATOMIC_FLAG_INIT;
+
+void LogWindows7ExceptionDetails(const EXCEPTION_POINTERS* exception) noexcept {
+    if (exception == nullptr || exception->ExceptionRecord == nullptr) {
+        return;
+    }
+
+    const auto* record = exception->ExceptionRecord;
+    const auto instruction = reinterpret_cast<uintptr_t>(record->ExceptionAddress);
+    const ULONG_PTR operation =
+        record->NumberParameters >= 1 ? record->ExceptionInformation[0] : ULONG_PTR(-1);
+    const auto fault_address = record->NumberParameters >= 2
+                                   ? reinterpret_cast<void*>(record->ExceptionInformation[1])
+                                   : nullptr;
+    const char* access = operation == 0   ? "read"
+                         : operation == 1 ? "write"
+                         : operation == 8 ? "execute"
+                                          : "unknown";
+
+    LOG_CRITICAL(Debug,
+                 "Windows 7 exception details: thread={}, access={}, fault_address={}, "
+                 "parameters={}",
+                 GetCurrentThreadId(), access, fault_address, record->NumberParameters);
+
+    if (fault_address != nullptr) {
+        MEMORY_BASIC_INFORMATION memory{};
+        if (VirtualQuery(fault_address, &memory, sizeof(memory)) != 0) {
+            LOG_CRITICAL(Debug,
+                         "Fault memory: base={}, allocation_base={}, region_size={:#x}, "
+                         "state={:#x}, protect={:#x}, allocation_protect={:#x}, type={:#x}",
+                         memory.BaseAddress, memory.AllocationBase,
+                         static_cast<u64>(memory.RegionSize), memory.State, memory.Protect,
+                         memory.AllocationProtect, memory.Type);
+        } else {
+            LOG_CRITICAL(Debug, "VirtualQuery failed for fault address {}: {}", fault_address,
+                         Common::GetLastErrorMsg());
+        }
+    }
+
+    HMODULE module{};
+    constexpr DWORD module_flags =
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+    if (record->ExceptionAddress != nullptr &&
+        GetModuleHandleExW(module_flags, reinterpret_cast<LPCWSTR>(record->ExceptionAddress),
+                           &module)) {
+        wchar_t module_path[32768]{};
+        const DWORD path_size = GetModuleFileNameW(module, module_path, 32768);
+        const auto module_base = reinterpret_cast<uintptr_t>(module);
+        if (path_size != 0) {
+            LOG_CRITICAL(Debug, "Fault module: {} + {:#x} (base={})",
+                         Common::UTF16ToUTF8(std::wstring_view{module_path, path_size}),
+                         instruction - module_base, reinterpret_cast<void*>(module));
+        } else {
+            LOG_CRITICAL(Debug, "Fault module base={} offset={:#x}; path lookup failed: {}",
+                         reinterpret_cast<void*>(module), instruction - module_base,
+                         Common::GetLastErrorMsg());
+        }
+    } else {
+        LOG_CRITICAL(Debug, "No loaded host module contains instruction {}",
+                     record->ExceptionAddress);
+    }
+
+#if defined(_M_X64) || defined(__x86_64__)
+    if (exception->ContextRecord != nullptr) {
+        const auto* context = exception->ContextRecord;
+        LOG_CRITICAL(Debug, "Registers: RIP={:#x} RSP={:#x} RBP={:#x} EFLAGS={:#x}", context->Rip,
+                     context->Rsp, context->Rbp, context->EFlags);
+        LOG_CRITICAL(Debug, "Registers: RAX={:#x} RBX={:#x} RCX={:#x} RDX={:#x}", context->Rax,
+                     context->Rbx, context->Rcx, context->Rdx);
+        LOG_CRITICAL(Debug, "Registers: RSI={:#x} RDI={:#x} R8={:#x} R9={:#x}", context->Rsi,
+                     context->Rdi, context->R8, context->R9);
+        LOG_CRITICAL(Debug, "Registers: R10={:#x} R11={:#x} R12={:#x} R13={:#x}", context->R10,
+                     context->R11, context->R12, context->R13);
+        LOG_CRITICAL(Debug, "Registers: R14={:#x} R15={:#x}", context->R14, context->R15);
+    }
+#endif
+}
+
+void WriteWindows7MiniDump(EXCEPTION_POINTERS* exception) noexcept {
+    if (exception == nullptr || crash_dump_started.test_and_set(std::memory_order_relaxed)) {
+        return;
+    }
+
+    constexpr wchar_t dump_name[] = L"shadps4-crash.dmp";
+    const HANDLE dump_file = CreateFileW(dump_name, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (dump_file == INVALID_HANDLE_VALUE) {
+        LOG_CRITICAL(Debug, "Unable to create shadps4-crash.dmp: {}", Common::GetLastErrorMsg());
+        return;
+    }
+
+    const HMODULE dbghelp = LoadLibraryW(L"dbghelp.dll");
+    if (dbghelp == nullptr) {
+        LOG_CRITICAL(Debug, "Unable to load dbghelp.dll for crash dump: {}",
+                     Common::GetLastErrorMsg());
+        CloseHandle(dump_file);
+        return;
+    }
+
+    using MiniDumpWriteDumpFn = BOOL(WINAPI*)(
+        HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, const MINIDUMP_EXCEPTION_INFORMATION*,
+        const MINIDUMP_USER_STREAM_INFORMATION*, const MINIDUMP_CALLBACK_INFORMATION*);
+    const auto write_dump =
+        reinterpret_cast<MiniDumpWriteDumpFn>(GetProcAddress(dbghelp, "MiniDumpWriteDump"));
+    if (write_dump == nullptr) {
+        LOG_CRITICAL(Debug, "dbghelp.dll has no MiniDumpWriteDump export: {}",
+                     Common::GetLastErrorMsg());
+        FreeLibrary(dbghelp);
+        CloseHandle(dump_file);
+        return;
+    }
+
+    MINIDUMP_EXCEPTION_INFORMATION dump_exception{
+        .ThreadId = GetCurrentThreadId(),
+        .ExceptionPointers = exception,
+        .ClientPointers = FALSE,
+    };
+    const BOOL written = write_dump(GetCurrentProcess(), GetCurrentProcessId(), dump_file,
+                                    MiniDumpNormal, &dump_exception, nullptr, nullptr);
+    const DWORD dump_error = written ? ERROR_SUCCESS : GetLastError();
+    FlushFileBuffers(dump_file);
+    FreeLibrary(dbghelp);
+    CloseHandle(dump_file);
+
+    if (written) {
+        wchar_t full_path[32768]{};
+        const DWORD path_size = GetFullPathNameW(dump_name, 32768, full_path, nullptr);
+        if (path_size != 0 && path_size < 32768) {
+            LOG_CRITICAL(Debug, "Crash minidump written to {}",
+                         Common::UTF16ToUTF8(std::wstring_view{full_path, path_size}));
+        } else {
+            LOG_CRITICAL(Debug, "Crash minidump written to shadps4-crash.dmp");
+        }
+    } else {
+        LOG_CRITICAL(Debug, "MiniDumpWriteDump failed: {}",
+                     Common::NativeErrorToString(static_cast<int>(dump_error)));
+    }
+}
+
+} // namespace
+#endif
 
 static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
     using namespace Libraries::Kernel;
@@ -143,6 +295,10 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
                                       : code != EXCEPTION_BREAKPOINT;
     if (report_unhandled) { // Windows static guest red-zone protection
         LOG_CRITICAL(Debug, "Unhandled Exception code {:#x} at {}", code, address);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        LogWindows7ExceptionDetails(pExp);
+        WriteWindows7MiniDump(pExp);
+#endif
         Common::Singleton<Core::Emulator>::Instance()->Shutdown();
     }
 
@@ -338,7 +494,7 @@ void SignalDispatch::RemoveHandlers() {
 #if defined(_WIN32)
     if (!(RemoveVectoredExceptionHandler(handle))) {
         LOG_CRITICAL(Core, "Failed to remove exception handler.");
-        std::quick_exit(1);
+        Common::QuickExit(1);
     }
 #else
     struct sigaction action{};
@@ -352,7 +508,7 @@ void SignalDispatch::RemoveHandlers() {
           sigaction(SIGUSR1, &action, nullptr) == 0 &&
           sigaction(SIGSLEEP, &action, nullptr) == 0)) {
         LOG_CRITICAL(Core, "Failed to remove signal handlers.");
-        std::quick_exit(1);
+        Common::QuickExit(1);
     }
 #endif
 }

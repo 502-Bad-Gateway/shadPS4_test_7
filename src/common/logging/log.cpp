@@ -12,6 +12,7 @@
 #endif
 
 #include "common/assert.h"
+#include "common/exit.h"
 #include "common/logging/log.h"
 #include "common/logging/log_file_sink.h"
 #include "common/types.h"
@@ -181,7 +182,7 @@ void Setup(std::string_view shadps4_filename) {
 
     std::call_once(already_registered, []() {
         std::atexit(Shutdown);
-        std::at_quick_exit(Flush);
+        Common::AtQuickExit(Flush);
         std::set_terminate(Terminate);
     });
 
@@ -252,15 +253,15 @@ void Terminate() {
 
         LOG_CRITICAL(Debug, "Exiting without exception");
 
-        std::quick_exit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITHOUT_EXCEPTION));
+        Common::QuickExit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITHOUT_EXCEPTION));
     } catch (const std::exception& exception) {
         LOG_CRITICAL(Debug, "Exception: {}", exception);
 
-        std::quick_exit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITH_EXCEPTION));
+        Common::QuickExit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITH_EXCEPTION));
     } catch (...) {
         LOG_CRITICAL(Debug, "Unknown exception caught");
 
-        std::quick_exit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITH_UNKNOWN_EXCEPTION));
+        Common::QuickExit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITH_UNKNOWN_EXCEPTION));
     }
 }
 

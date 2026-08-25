@@ -16,6 +16,7 @@
 #ifdef _WIN64
 #include <windows.h>
 #include "common/ntapi.h"
+#include "common/windows_compat.h"
 #else
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <date/tz.h>
@@ -139,7 +140,7 @@ s32 PS4_SYSV_ABI posix_clock_gettime(u32 clock_id, OrbisKernelTimespec* ts) {
     case ORBIS_CLOCK_REALTIME:
     case ORBIS_CLOCK_REALTIME_PRECISE: {
         FILETIME ft;
-        GetSystemTimePreciseAsFileTime(&ft);
+        Common::Windows::GetSystemTimePreciseAsFileTime(&ft);
         static constexpr u64 DeltaEpochIn100ns = 116444736000000000ULL;
         const u64 ns = FileTimeTo100Ns(ft) - DeltaEpochIn100ns;
         ts->tv_sec = ns / 10'000'000;
@@ -396,7 +397,7 @@ s32 PS4_SYSV_ABI posix_gettimeofday(OrbisKernelTimeval* tp, OrbisKernelTimezone*
 #ifdef _WIN64
     if (tp) {
         FILETIME filetime;
-        GetSystemTimePreciseAsFileTime(&filetime);
+        Common::Windows::GetSystemTimePreciseAsFileTime(&filetime);
 
         constexpr u64 UNIX_TIME_START = 0x295E9648864000;
         constexpr u64 TICKS_PER_SECOND = 1000000;

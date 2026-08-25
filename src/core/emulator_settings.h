@@ -205,10 +205,22 @@ struct GeneralSettings {
     Setting<bool> trophy_popup_disabled{false};
     Setting<double> trophy_notification_duration{6.0};
     Setting<std::string> trophy_notification_side{"right"};
-    Setting<bool> show_splash{false};
+    Setting<bool> show_splash{
+#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+        true
+#else
+        false
+#endif
+    };
     Setting<bool> connected_to_network{false};
     Setting<bool> discord_rpc_enabled{false};
-    Setting<bool> show_fps_counter{false};
+    Setting<bool> show_fps_counter{
+#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+        true
+#else
+        false
+#endif
+    };
     Setting<int> console_language{1};
     Setting<int> big_picture_scale{1000};
     Setting<std::string> shadnet_server{"srv.shadps4.net:31313"};
@@ -419,7 +431,13 @@ struct GPUSettings {
     Setting<u32> window_height{720};
     Setting<u32> internal_screen_width{1280};
     Setting<u32> internal_screen_height{720};
-    Setting<bool> null_gpu{false};
+    Setting<bool> null_gpu{
+#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+        true
+#else
+        false
+#endif
+    };
     Setting<bool> copy_gpu_buffers{false};
     Setting<u32> readbacks_mode{GpuReadbacksMode::Disabled};
     Setting<bool> readback_linear_images_enabled{false};
@@ -608,6 +626,11 @@ private:
     }
 
     static void PrintChangedSummary(const std::vector<std::string>& changed);
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+    // Make the compatibility-only test mode immune to stale global and per-game overrides.
+    void ApplyWindows7CompatibilityOnlyDefaults();
+#endif
 
 public:
     // Add these getters to access overrideable fields

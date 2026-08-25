@@ -40,6 +40,22 @@ option(ENABLE_DISCORD_RPC "Enable the Discord RPC integration" ON)
 option(ENABLE_UPDATER "Enables the options to updater" ON)
 option(ENABLE_TESTS "Build unit tests (requires GTest)" OFF)
 option(ENABLE_SYSTEM_LIBRARIES "Enable building against system libraries" OFF)
+option(ENABLE_WINDOWS_7_COMPAT "Build the experimental Windows 7 compatibility path" OFF)
+
+set(_windows7_compat_only_default OFF)
+if (ENABLE_WINDOWS_7_COMPAT)
+    set(_windows7_compat_only_default ON)
+endif()
+option(ENABLE_WINDOWS_7_COMPAT_ONLY
+       "Force the Windows 7 compatibility-only test defaults (null GPU, FPS counter, splash)"
+       ${_windows7_compat_only_default})
+
+if (ENABLE_WINDOWS_7_COMPAT AND NOT WIN32)
+    message(FATAL_ERROR "ENABLE_WINDOWS_7_COMPAT is only supported for Windows targets")
+endif()
+if (ENABLE_WINDOWS_7_COMPAT_ONLY AND NOT ENABLE_WINDOWS_7_COMPAT)
+    message(FATAL_ERROR "ENABLE_WINDOWS_7_COMPAT_ONLY requires ENABLE_WINDOWS_7_COMPAT")
+endif()
 
 # First, determine whether to use CMAKE_OSX_ARCHITECTURES or CMAKE_SYSTEM_PROCESSOR.
 if (APPLE AND CMAKE_OSX_ARCHITECTURES)
@@ -784,6 +800,9 @@ set(COMMON src/common/logging/classes.h
            src/common/elf_info.h
            src/common/endian.h
            src/common/enum.h
+           src/common/exit.cpp
+           src/common/exit.h
+           src/common/httplib_compat.h
            src/common/incremental_id.h
            src/common/io_file.cpp
            src/common/io_file.h
@@ -825,6 +844,8 @@ set(COMMON src/common/logging/classes.h
            src/common/uint128.h
            src/common/unique_function.h
            src/common/va_ctx.h
+           src/common/windows_compat.cpp
+           src/common/windows_compat.h
            src/common/ntapi.h
            src/common/ntapi.cpp
            src/common/number_utils.h
@@ -1332,7 +1353,11 @@ elseif (${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
 endif()
 
 if (WIN32)
-    target_link_libraries(shadps4 PRIVATE mincore wepoll wbemuuid)
+    target_link_libraries(shadps4 PRIVATE wepoll wbemuuid crypt32)
+
+    if (NOT ENABLE_WINDOWS_7_COMPAT)
+        target_link_libraries(shadps4 PRIVATE mincore)
+    endif()
 
     if (MSVC)
         # MSVC likes putting opinions on what people can use, disable:
@@ -1346,8 +1371,19 @@ if (WIN32)
         add_compile_definitions(_TIMESPEC_DEFINED)
     endif()
 
-    # Target Windows 10 RS5
-    add_compile_definitions(NTDDI_VERSION=0x0A000006 _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+    if (ENABLE_WINDOWS_7_COMPAT)
+        # Windows 7 SP1 portability path. Vulkan remains intentionally unmodified in the
+        # compatibility-only validation build.
+        add_compile_definitions(NTDDI_VERSION=0x06010000 _WIN32_WINNT=0x0601 WINVER=0x0601
+                                SHADPS4_WINDOWS_7_COMPAT)
+        if (ENABLE_WINDOWS_7_COMPAT_ONLY)
+            add_compile_definitions(SHADPS4_WINDOWS_7_COMPAT_ONLY)
+        endif()
+
+    else()
+        # Target Windows 10 RS5
+        add_compile_definitions(NTDDI_VERSION=0x0A000006 _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+    endif()
 
     if (MSVC)
         target_link_libraries(shadps4 PRIVATE clang_rt.builtins-x86_64.lib)
@@ -1367,11 +1403,19 @@ if (WIN32)
         target_link_options(shadps4 PRIVATE -Wl,--stack,2097152)
     endif()
 
+    # Keep the executable above the guest range. Windows 7 x64 has an 8 TiB user-mode ceiling,
+    # whereas newer Windows versions can use shadPS4's normal 112 TiB preferred address.
+    if (ENABLE_WINDOWS_7_COMPAT)
+        set(SHADPS4_WINDOWS_IMAGE_BASE 0x70000000000)
+    else()
+        set(SHADPS4_WINDOWS_IMAGE_BASE 0x700000000000)
+    endif()
+
     # Change base image address
     if (MSVC)
-        target_link_options(shadps4 PRIVATE /BASE:0x700000000000)
+        target_link_options(shadps4 PRIVATE /BASE:${SHADPS4_WINDOWS_IMAGE_BASE})
     else()
-        target_link_options(shadps4 PRIVATE -Wl,--image-base=0x700000000000)
+        target_link_options(shadps4 PRIVATE -Wl,--image-base=${SHADPS4_WINDOWS_IMAGE_BASE})
     endif()
 endif()
 

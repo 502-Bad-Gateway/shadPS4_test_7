@@ -266,8 +266,12 @@ uintptr_t IOFile::GetFileMapping() {
     HANDLE mapping = nullptr;
 
     if (file_access_mode == FileAccessMode::ReadWrite) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        mapping = CreateFileMappingW(hfile, nullptr, PAGE_READWRITE | SEC_COMMIT, 0, 0, nullptr);
+#else
         mapping = CreateFileMapping2(hfile, NULL, FILE_MAP_WRITE, PAGE_READWRITE, SEC_COMMIT, 0,
                                      NULL, NULL, 0);
+#endif
     } else {
         mapping = hfile;
     }

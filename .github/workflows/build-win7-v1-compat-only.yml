@@ -1,0 +1,207 @@
+name: Build shadPS4 Win7 V1 compatibility-only
+
+on:
+  push:
+    branches: [win7-v1-compat-only]
+    paths:
+      - CMakeLists.txt
+      - src/**
+      - tools/win7-launcher/**
+      - ci/**
+      - WIN7-V1-COMPATIBILITY-ONLY.md
+      - .github/workflows/build-win7-v1-compat-only.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-win7-x64:
+    name: Build Windows 7 x64 compatibility-only target
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Fetch llvm-mingw
+        shell: pwsh
+        run: |
+          $version = '20260616'
+          $archiveName = "llvm-mingw-$version-msvcrt-x86_64.zip"
+          $archive = Join-Path $env:RUNNER_TEMP $archiveName
+          $parent = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$version/$archiveName"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Remove-Item -Recurse -Force $parent -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $parent | Out-Null
+          Expand-Archive -Path $archive -DestinationPath $parent
+          $root = Join-Path $parent "llvm-mingw-$version-msvcrt-x86_64"
+          $bin = Join-Path $root 'bin'
+          foreach ($tool in @('x86_64-w64-mingw32-clang.exe',
+                              'x86_64-w64-mingw32-clang++.exe',
+                              'llvm-readobj.exe',
+                              'llvm-strings.exe')) {
+              if (!(Test-Path (Join-Path $bin $tool))) {
+                  throw "llvm-mingw tool not found: $tool"
+              }
+          }
+          "LLVM_MINGW_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Apply the llvm-mingw FDK workaround
+        shell: pwsh
+        run: |
+          git -C externals/aacdec/fdk-aac apply --check ci/fdk-aac-llvm-mingw.patch
+          if ($LASTEXITCODE -ne 0) { throw 'FDK patch check failed' }
+          git -C externals/aacdec/fdk-aac apply ci/fdk-aac-llvm-mingw.patch
+          if ($LASTEXITCODE -ne 0) { throw 'FDK patch application failed' }
+
+      - name: Prepare launcher dependency
+        shell: pwsh
+        run: |
+          $jsonDir = Join-Path $env:GITHUB_WORKSPACE 'tools/win7-launcher/third_party/nlohmann'
+          New-Item -ItemType Directory -Force -Path $jsonDir | Out-Null
+          Invoke-WebRequest `
+            -Uri 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' `
+            -OutFile (Join-Path $jsonDir 'json.hpp')
+
+      - name: Configure Windows 7 compatibility-only build
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:LLVM_MINGW_ROOT 'bin'
+          $cc = Join-Path $bin 'x86_64-w64-mingw32-clang.exe'
+          $cxx = Join-Path $bin 'x86_64-w64-mingw32-clang++.exe'
+          $rc = Join-Path $bin 'x86_64-w64-mingw32-windres.exe'
+          if (!(Test-Path $rc)) { $rc = Join-Path $bin 'llvm-windres.exe' }
+          if (!(Test-Path $rc)) { throw 'llvm-mingw resource compiler not found' }
+          $env:SOURCE_DATE_EPOCH = '0'
+          $env:TZ = 'UTC'
+          cmake -S . -B build-win7-v1 -G Ninja `
+            "-DCMAKE_C_COMPILER=$cc" `
+            "-DCMAKE_CXX_COMPILER=$cxx" `
+            "-DCMAKE_RC_COMPILER=$rc" `
+            '-DCMAKE_BUILD_TYPE=Release' `
+            '-DCMAKE_C_FLAGS=-march=x86-64-v3' `
+            '-DCMAKE_CXX_FLAGS=-march=x86-64-v3' `
+            '-DENABLE_WINDOWS_7_COMPAT=ON' `
+            '-DENABLE_WINDOWS_7_COMPAT_ONLY=ON' `
+            '-DENABLE_DISCORD_RPC=OFF' `
+            '-DENABLE_UPDATER=OFF' `
+            '-DENABLE_TESTS=OFF'
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+
+      - name: Build emulator
+        shell: pwsh
+        run: |
+          cmake --build build-win7-v1 --target shadps4 --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'shadPS4 build failed' }
+
+      - name: Build Windows 7 launcher
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:LLVM_MINGW_ROOT 'bin'
+          $cxx = Join-Path $bin 'x86_64-w64-mingw32-clang++.exe'
+          $rc = Join-Path $bin 'x86_64-w64-mingw32-windres.exe'
+          if (!(Test-Path $rc)) { $rc = Join-Path $bin 'llvm-windres.exe' }
+          $launcher = Join-Path $env:GITHUB_WORKSPACE 'tools/win7-launcher'
+          $res = Join-Path $env:RUNNER_TEMP 'shadps4-win7-launcher.res'
+          $exe = Join-Path $env:RUNNER_TEMP 'shadps4-win7-launcher.exe'
+          Push-Location $launcher
+          try {
+              & $rc '-I' '.' 'launcher.rc' '-O' 'coff' '-o' $res
+              if ($LASTEXITCODE -ne 0) { throw 'launcher resource compilation failed' }
+              & $cxx '-std=c++17' '-O2' '-DNDEBUG' '-DUNICODE' '-D_UNICODE' `
+                  '-D_WIN32_WINNT=0x0601' '-DWINVER=0x0601' '-I' '.' 'main.cpp' $res `
+                  '-o' $exe '-mwindows' '-municode' '-static' '-fuse-ld=lld' `
+                  '-Wl,--subsystem,windows:6.01' '-Wl,--disable-high-entropy-va' `
+                  '-lcomctl32' '-lcomdlg32' '-lshell32' '-lgdi32' '-lole32' '-luuid'
+              if ($LASTEXITCODE -ne 0) { throw 'launcher build failed' }
+          } finally {
+              Pop-Location
+          }
+
+      - name: Package and audit artifact
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'artifact'
+          Remove-Item -Recurse -Force $output -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $emulator = Join-Path $env:GITHUB_WORKSPACE 'build-win7-v1/shadps4.exe'
+          if (!(Test-Path $emulator)) { throw 'shadps4.exe was not produced' }
+          Copy-Item $emulator (Join-Path $output 'shadps4.exe')
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'shadps4-win7-launcher.exe') `
+              (Join-Path $output 'shadps4-win7-launcher.exe')
+          Copy-Item LICENSE (Join-Path $output 'LICENSE-shadPS4')
+          Copy-Item tools/win7-launcher/LICENSE-GPL-2.0-or-later.txt `
+              (Join-Path $output 'LICENSE-win7-launcher-GPL-2.0-or-later.txt')
+
+          foreach ($dllName in @('libc++.dll', 'libunwind.dll', 'libwinpthread-1.dll')) {
+              $candidates = @(Get-ChildItem -Path $env:LLVM_MINGW_ROOT -Recurse -File -Filter $dllName)
+              if ($candidates.Count -eq 0) { throw "Runtime DLL not found: $dllName" }
+              $preferred = $candidates | Where-Object { $_.FullName -match 'x86_64-w64-mingw32' } |
+                  Select-Object -First 1
+              if ($null -eq $preferred) { $preferred = $candidates | Select-Object -First 1 }
+              Copy-Item $preferred.FullName (Join-Path $output $dllName)
+          }
+
+          $readObj = Join-Path $env:LLVM_MINGW_ROOT 'bin/llvm-readobj.exe'
+          $auditPath = Join-Path $output 'PE-AUDIT.txt'
+          & $readObj '--file-headers' '--coff-imports' (Join-Path $output 'shadps4.exe') |
+              Out-File -Encoding utf8 $auditPath
+          $audit = Get-Content -Raw $auditPath
+          foreach ($forbidden in @('VirtualAlloc2', 'CreateFileMapping2', 'MapViewOfFile3',
+                                   'UnmapViewOfFile2', 'SetThreadDescription',
+                                   'GetThreadDescription', 'GetSystemTimePreciseAsFileTime')) {
+              if ($audit -match "Name: $([regex]::Escape($forbidden))") {
+                  throw "Forbidden post-Win7 static import detected: $forbidden"
+              }
+          }
+
+          $stringsTool = Join-Path $env:LLVM_MINGW_ROOT 'bin/llvm-strings.exe'
+          $strings = (& $stringsTool (Join-Path $output 'shadps4.exe') | Out-String)
+          foreach ($required in @('Windows 7 compatibility-only defaults active',
+                                  'Windows 7 compatibility-only test build')) {
+              if (!$strings.Contains($required)) { throw "Required marker missing: $required" }
+          }
+          foreach ($forbidden in @('Windows 7 NVIDIA sampler workaround',
+                                   'Win7 graphics pipeline state',
+                                   'Win7 graphics descriptor layout')) {
+              if ($strings.Contains($forbidden)) { throw "GPU/Vulkan experiment leaked: $forbidden" }
+          }
+
+          @"
+          lineage=clean-upstream-7fb1a530
+          upstream_commit=7fb1a530c15415097836521fec6f3483e27c81ae
+          phase=windows7-compatibility-only-v1
+          llvm_mingw=20260616-msvcrt-x86_64
+          llvm=22.1.8
+          target=x86_64-w64-windows-gnu
+          cpu=x86-64-v3
+          null_gpu_default=true
+          show_splash_default=true
+          show_fps_counter_default=true
+          vulkan_compat_patches=false
+          "@ | Out-File -Encoding ascii (Join-Path $output 'BUILD-IDENTITY.txt')
+
+          $hashLines = @(Get-ChildItem $output -File |
+              Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
+              ForEach-Object {
+                  $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+                  "$hash  $($_.Name)"
+              } | Sort-Object)
+          $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
+
+      - name: Upload Windows 7 V1 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: shadps4-win7-v1-compat-only-${{ github.sha }}
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30

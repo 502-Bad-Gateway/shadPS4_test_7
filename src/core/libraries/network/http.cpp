@@ -20,6 +20,7 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 #include "common/elf_info.h"
+#include "common/httplib_compat.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
@@ -31,7 +32,6 @@
 #include "http_error.h"
 
 #if __has_include(<httplib.h>)
-#include <httplib.h>
 #define ORBIS_HTTP_WITH_HTTPLIB 1
 #endif
 

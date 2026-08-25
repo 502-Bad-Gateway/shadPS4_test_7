@@ -13,6 +13,7 @@
 #include <hwinfo/hwinfo.h>
 
 #include "common/debug.h"
+#include "common/exit.h"
 #include "common/logging/log.h"
 #include "common/string_util.h"
 #include "common/thread.h"
@@ -78,7 +79,7 @@ Emulator::Emulator() {
     WSADATA wsaData;
     WSAStartup(versionWanted, &wsaData);
 #endif
-    std::at_quick_exit([]() { Common::Singleton<Core::Emulator>::Instance()->Shutdown(); });
+    Common::AtQuickExit([]() { Common::Singleton<Core::Emulator>::Instance()->Shutdown(); });
 }
 
 Emulator::~Emulator() {}
@@ -430,6 +431,11 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
 
     EmulatorSettings.Load(id);
+#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+    LOG_INFO(Config,
+             "Windows 7 compatibility-only test build: GPU/Vulkan execution is disabled for "
+             "this game");
+#endif
     // Windows static guest red-zone protection
     WindowsGuestRedZoneProtection::SetActiveMode(
         EmulatorSettings.GetWindowsGuestRedZoneProtectionMode());
@@ -668,7 +674,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     // Load the module with the linker.
     if (linker->LoadModule(guest_eboot_path) == -1) {
         LOG_CRITICAL(Loader, "Failed to load game's eboot.bin: {}", guest_eboot_path);
-        std::quick_exit(0);
+        Common::QuickExit(0);
     }
 
 #ifdef ENABLE_DISCORD_RPC
@@ -703,7 +709,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     UpdatePlayTime(id);
     Storage::DataBase::Instance().Close();
 
-    std::quick_exit(0);
+    Common::QuickExit(0);
 }
 
 void Emulator::Restart(std::filesystem::path eboot_path,
@@ -806,7 +812,7 @@ void Emulator::Restart(std::filesystem::path eboot_path,
 
     if (!success) {
         std::cerr << "Failed to restart game: {}" << GetLastError() << std::endl;
-        std::quick_exit(1);
+        Common::QuickExit(1);
     }
 
     CloseHandle(pi.hProcess);
@@ -827,16 +833,16 @@ void Emulator::Restart(std::filesystem::path eboot_path,
         // Child process - execute the new instance
         execvp(executableName, argv.data());
         std::cerr << "Failed to restart game: execvp failed" << std::endl;
-        std::quick_exit(1);
+        Common::QuickExit(1);
     } else if (pid < 0) {
         std::cerr << "Failed to restart game: fork failed" << std::endl;
-        std::quick_exit(1);
+        Common::QuickExit(1);
     }
 #else
 #error "Unsupported platform"
 #endif
 
-    std::quick_exit(0);
+    Common::QuickExit(0);
 }
 
 void Emulator::UpdatePlayTime(const std::string& serial) {

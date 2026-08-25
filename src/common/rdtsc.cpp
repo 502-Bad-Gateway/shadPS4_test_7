@@ -21,14 +21,17 @@ static u64 RoundToNearest(u64 value) {
 
 static u64 GetTimeNs() {
 #ifdef _WIN64
-    // GetSystemTimePreciseAsFileTime returns the file time in 100ns units.
-    static constexpr u64 Multiplier = 100;
-    // Convert Windows epoch to Unix epoch.
-    static constexpr u64 WindowsEpochToUnixEpoch = 0x19DB1DED53E8000LL;
-    FILETIME filetime;
-    GetSystemTimePreciseAsFileTime(&filetime);
-    return Multiplier * ((static_cast<u64>(filetime.dwHighDateTime) << 32) +
-                         static_cast<u64>(filetime.dwLowDateTime) - WindowsEpochToUnixEpoch);
+    // QPC is available on Windows 7 and provides the high-resolution interval measurement needed
+    // for TSC calibration. Wall-clock time would also make this vulnerable to clock adjustments.
+    static const LARGE_INTEGER frequency = [] {
+        LARGE_INTEGER value{};
+        QueryPerformanceFrequency(&value);
+        return value;
+    }();
+    LARGE_INTEGER counter{};
+    QueryPerformanceCounter(&counter);
+    return MultiplyAndDivide64(static_cast<u64>(counter.QuadPart), SecondToNanoseconds,
+                               static_cast<u64>(frequency.QuadPart));
 #elif defined(__APPLE__)
     return clock_gettime_nsec_np(CLOCK_REALTIME);
 #else
