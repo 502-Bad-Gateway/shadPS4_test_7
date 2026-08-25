@@ -151,10 +151,17 @@ vulkan_compat_patches=false
 old_v1_v18_memory_backend=false
 "@ | Out-File -Encoding ascii (Join-Path $OutputDirectory 'BUILD-IDENTITY.txt')
 
-Get-ChildItem $OutputDirectory -File | ForEach-Object {
-    $Hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
-    "$Hash  $($_.Name)"
-} | Sort-Object | Out-File -Encoding ascii (Join-Path $OutputDirectory 'SHA256SUMS.txt')
+$HashFile = Join-Path $OutputDirectory 'SHA256SUMS.txt'
+$HashLines = @(
+    Get-ChildItem $OutputDirectory -File |
+        Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
+        ForEach-Object {
+            $Hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+            "$Hash  $($_.Name)"
+        } |
+        Sort-Object
+)
+$HashLines | Out-File -Encoding ascii $HashFile
 Write-Host "=== Build complete ==="
 Get-Content (Join-Path $OutputDirectory 'BUILD-IDENTITY.txt')
-Get-Content (Join-Path $OutputDirectory 'SHA256SUMS.txt')
+Get-Content $HashFile
