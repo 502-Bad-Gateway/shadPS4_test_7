@@ -11,7 +11,7 @@ $ChunkDir = Join-Path $PSScriptRoot 'ci-payload'
 $PayloadZip = Join-Path $PSScriptRoot 'phase1-ci-payload.zip'
 $CoreScript = Join-Path $PSScriptRoot 'build-win7-phase1.ps1'
 $PatchedCoreScript = Join-Path $PSScriptRoot 'build-win7-phase1-ci-runtime.ps1'
-$LauncherThemePatch = Join-Path $PSScriptRoot 'launcher-dark-theme.patch'
+$LauncherThemeScript = Join-Path $PSScriptRoot 'apply-launcher-dark-theme.ps1'
 
 Write-Host '=== Reconstructing audited Phase-1 CI payload ==='
 $Chunks = @(Get-ChildItem -Path $ChunkDir -File -Filter 'part*.txt' | Sort-Object Name)
@@ -32,8 +32,8 @@ Write-Host "Payload SHA256: $ActualHash"
 if ($ActualHash -ne $ExpectedPayloadSha256) {
     throw "Reconstructed payload hash mismatch; expected $ExpectedPayloadSha256"
 }
-if (!(Test-Path $LauncherThemePatch)) {
-    throw "Launcher theme patch not found: $LauncherThemePatch"
+if (!(Test-Path $LauncherThemeScript)) {
+    throw "Launcher theme script not found: $LauncherThemeScript"
 }
 
 $CoreText = Get-Content -Raw $CoreScript
@@ -48,15 +48,7 @@ $JsonDir = Join-Path $LauncherSource 'third_party\nlohmann'
 '@
 $NewLauncherSetup = @'
 $LauncherSource = Join-Path $PayloadDir 'launcher-source'
-Push-Location $PayloadDir
-try {
-    git apply -p0 --check $LauncherThemePatch
-    if ($LASTEXITCODE -ne 0) { throw 'launcher dark-theme patch check failed' }
-    git apply -p0 $LauncherThemePatch
-    if ($LASTEXITCODE -ne 0) { throw 'launcher dark-theme patch failed' }
-} finally {
-    Pop-Location
-}
+& (Join-Path $PSScriptRoot 'apply-launcher-dark-theme.ps1') -SourcePath (Join-Path $LauncherSource 'main.cpp')
 $JsonDir = Join-Path $LauncherSource 'third_party\nlohmann'
 '@
 if (!$CoreText.Contains($OldLauncherSetup)) {
