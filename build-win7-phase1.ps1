@@ -11,7 +11,7 @@ $ToolchainVersion = '20260616'
 $ToolchainUrl = 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-msvcrt-x86_64.zip'
 $ToolchainDirName = 'llvm-mingw-20260616-msvcrt-x86_64'
 $PayloadZip = Join-Path $PSScriptRoot 'phase1-ci-payload.zip'
-$PayloadSha256 = '1316be1085285763f3c1de985b34201d17372d06f72ded29ebd1a1c0ddad1e2a'
+$PayloadSha256 = '35c61fd9e42e289be630edf2b58814f9d407dab5aea5c59a41042edc1a75e544'
 $NlohmannUrl = 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp'
 
 Write-Host "=== shadPS4 Win7 Phase 1 clean build ==="
