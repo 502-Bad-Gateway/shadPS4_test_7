@@ -4,6 +4,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+Write-Host 'CI controller revision: 6'
 
 $ExpectedPayloadSha256 = '1316be1085285763f3c1de985b34201d17372d06f72ded29ebd1a1c0ddad1e2a'
 $OldCorruptPayloadSha256 = '35c61fd9e42e289be630edf2b58814f9d407dab5aea5c59a41042edc1a75e544'
