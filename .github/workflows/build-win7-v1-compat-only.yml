@@ -58,9 +58,9 @@ jobs:
       - name: Apply the llvm-mingw FDK workaround
         shell: pwsh
         run: |
-          git -C externals/aacdec/fdk-aac apply --check ci/fdk-aac-llvm-mingw.patch
+          git -C externals/aacdec/fdk-aac apply --check ../../../ci/fdk-aac-llvm-mingw.patch
           if ($LASTEXITCODE -ne 0) { throw 'FDK patch check failed' }
-          git -C externals/aacdec/fdk-aac apply ci/fdk-aac-llvm-mingw.patch
+          git -C externals/aacdec/fdk-aac apply ../../../ci/fdk-aac-llvm-mingw.patch
           if ($LASTEXITCODE -ne 0) { throw 'FDK patch application failed' }
 
       - name: Prepare launcher dependency
