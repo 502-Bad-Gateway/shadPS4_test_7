@@ -4,7 +4,10 @@ on:
   push:
     branches: [Pre-release-shadPS4-win7-phase1-nullgpu]
     paths:
+      - run-win7-phase1-ci.ps1
       - build-win7-phase1.ps1
+      - ci-payload/**
+      - .github/workflows/build-win7-phase1-nullgpu.yml
   workflow_dispatch:
 
 permissions:
@@ -21,7 +24,7 @@ jobs:
 
       - name: Build exact Windows 7 Phase 1 binary
         shell: pwsh
-        run: .\build-win7-phase1.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE\artifact"
+        run: .\run-win7-phase1-ci.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE\artifact"
 
       - name: Upload Windows 7 runnable artifact
         uses: actions/upload-artifact@v4
