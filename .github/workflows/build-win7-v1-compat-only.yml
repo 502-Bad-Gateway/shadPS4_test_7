@@ -81,12 +81,15 @@ jobs:
           $rc = Join-Path $bin 'x86_64-w64-mingw32-windres.exe'
           if (!(Test-Path $rc)) { $rc = Join-Path $bin 'llvm-windres.exe' }
           if (!(Test-Path $rc)) { throw 'llvm-mingw resource compiler not found' }
+          $ccCMake = $cc -replace '\\', '/'
+          $cxxCMake = $cxx -replace '\\', '/'
+          $rcCMake = $rc -replace '\\', '/'
           $env:SOURCE_DATE_EPOCH = '0'
           $env:TZ = 'UTC'
           cmake -S . -B build-win7-v1 -G Ninja `
-            "-DCMAKE_C_COMPILER=$cc" `
-            "-DCMAKE_CXX_COMPILER=$cxx" `
-            "-DCMAKE_RC_COMPILER=$rc" `
+            "-DCMAKE_C_COMPILER=$ccCMake" `
+            "-DCMAKE_CXX_COMPILER=$cxxCMake" `
+            "-DCMAKE_RC_COMPILER=$rcCMake" `
             '-DCMAKE_BUILD_TYPE=Release' `
             '-DCMAKE_C_FLAGS=-march=x86-64-v3' `
             '-DCMAKE_CXX_FLAGS=-march=x86-64-v3' `
