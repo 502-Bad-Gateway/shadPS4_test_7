@@ -1,0 +1,153 @@
+--- launcher-source/main.cpp	2026-08-25 13:35:06.636828839 +0000
++++ launcher-source/main.cpp	2026-08-25 13:35:07.784737921 +0000
+@@ -105,6 +105,15 @@
+ HWND g_open_results = nullptr;
+ HWND g_status = nullptr;
+ HFONT g_font = nullptr;
++HBRUSH g_background_brush = nullptr;
++HBRUSH g_control_brush = nullptr;
++HBRUSH g_status_brush = nullptr;
++
++constexpr COLORREF kDarkBackground = RGB(32, 32, 32);
++constexpr COLORREF kDarkControl = RGB(45, 45, 45);
++constexpr COLORREF kDarkStatus = RGB(38, 38, 38);
++constexpr COLORREF kDarkText = RGB(232, 232, 232);
++constexpr COLORREF kDarkDisabledText = RGB(145, 145, 145);
+ 
+ std::wstring g_exe_dir;
+ std::wstring g_shadps4_exe;
+@@ -1623,12 +1632,25 @@
+     MoveWindow(g_status, 0, height - 28, width, 28, TRUE);
+ }
+ 
++void DisableVisualTheme(HWND control) {
++    using SetWindowThemeFn = HRESULT(WINAPI*)(HWND, LPCWSTR, LPCWSTR);
++    static HMODULE module = LoadLibraryW(L"uxtheme.dll");
++    static SetWindowThemeFn set_window_theme =
++        module ? reinterpret_cast<SetWindowThemeFn>(GetProcAddress(module, "SetWindowTheme")) : nullptr;
++    if (set_window_theme) {
++        set_window_theme(control, L"", L"");
++    }
++}
++
+ HWND CreateControl(const wchar_t* class_name, const wchar_t* text, DWORD style, int id) {
+     HWND control = CreateWindowExW(0, class_name, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0,
+                                    0, g_window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
+                                    g_instance, nullptr);
+-    if (control && g_font) {
+-        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
++    if (control) {
++        DisableVisualTheme(control);
++        if (g_font) {
++            SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
++        }
+     }
+     return control;
+ }
+@@ -1672,6 +1694,10 @@
+                                  reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_SETTINGS_LIST)),
+                                  g_instance, nullptr);
+     SendMessageW(g_settings, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
++    DisableVisualTheme(g_settings);
++    ListView_SetBkColor(g_settings, kDarkControl);
++    ListView_SetTextBkColor(g_settings, kDarkControl);
++    ListView_SetTextColor(g_settings, kDarkText);
+     ListView_SetExtendedListViewStyle(
+         g_settings, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+     LVCOLUMNW column{};
+@@ -1702,6 +1728,7 @@
+                                WS_CHILD | WS_VISIBLE | SS_LEFT | SS_SUNKEN, 0, 0, 0, 0,
+                                g_window, nullptr, g_instance, nullptr);
+     SendMessageW(g_status, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
++    DisableVisualTheme(g_status);
+ 
+     MoveWindow(value_label, 12, 0, 90, 20, TRUE);
+     SetWindowLongPtrW(value_label, GWLP_USERDATA, 1);
+@@ -1733,6 +1760,25 @@
+         DragAcceptFiles(window, TRUE);
+         return 0;
+ 
++    case WM_CTLCOLORSTATIC:
++    case WM_CTLCOLOREDIT:
++    case WM_CTLCOLORLISTBOX:
++    case WM_CTLCOLORBTN: {
++        HDC dc = reinterpret_cast<HDC>(wparam);
++        HWND control = reinterpret_cast<HWND>(lparam);
++        const bool is_status = control == g_status;
++        const bool is_static = message == WM_CTLCOLORSTATIC;
++        const bool use_background = is_static && !is_status;
++        const COLORREF background =
++            is_status ? kDarkStatus : (use_background ? kDarkBackground : kDarkControl);
++        SetTextColor(dc, IsWindowEnabled(control) ? kDarkText : kDarkDisabledText);
++        SetBkColor(dc, background);
++        SetBkMode(dc, OPAQUE);
++        return reinterpret_cast<LRESULT>(is_status ? g_status_brush
++                                                    : (use_background ? g_background_brush
++                                                                      : g_control_brush));
++    }
++
+     case WM_SIZE: {
+         const int width = LOWORD(lparam);
+         const int height = HIWORD(lparam);
+@@ -1806,7 +1852,17 @@
+     case WM_NOTIFY: {
+         const auto* header = reinterpret_cast<NMHDR*>(lparam);
+         if (header->idFrom == ID_SETTINGS_LIST) {
+-            if (header->code == LVN_ITEMCHANGED) {
++            if (header->code == NM_CUSTOMDRAW) {
++                auto* custom = reinterpret_cast<NMLVCUSTOMDRAW*>(lparam);
++                if (custom->nmcd.dwDrawStage == CDDS_PREPAINT) {
++                    return CDRF_NOTIFYITEMDRAW;
++                }
++                if (custom->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
++                    custom->clrText = kDarkText;
++                    custom->clrTextBk = kDarkControl;
++                    return CDRF_DODEFAULT;
++                }
++            } else if (header->code == LVN_ITEMCHANGED) {
+                 UpdateEditorFromSelection();
+             } else if (header->code == NM_DBLCLK) {
+                 const auto selected = SelectedVisibleIndex();
+@@ -1877,6 +1933,15 @@
+     g_state_path = JoinPath(g_exe_dir, L"shadps4-win7-launcher-state.json");
+     LoadLauncherState();
+ 
++    g_background_brush = CreateSolidBrush(kDarkBackground);
++    g_control_brush = CreateSolidBrush(kDarkControl);
++    g_status_brush = CreateSolidBrush(kDarkStatus);
++    if (!g_background_brush || !g_control_brush || !g_status_brush) {
++        MessageBoxW(nullptr, L"Unable to create launcher theme resources.",
++                    L"shadPS4 launcher startup error", MB_ICONERROR);
++        return 1;
++    }
++
+     WNDCLASSEXW window_class{};
+     window_class.cbSize = sizeof(window_class);
+     window_class.style = CS_HREDRAW | CS_VREDRAW;
+@@ -1884,7 +1949,7 @@
+     window_class.hInstance = instance;
+     window_class.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+-    window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
++    window_class.hbrBackground = g_background_brush;
+     window_class.lpszClassName = kWindowClass;
+     window_class.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
+     if (!RegisterClassExW(&window_class)) {
+@@ -1942,5 +2007,17 @@
+             DispatchMessageW(&message);
+         }
+     }
++    if (g_status_brush) {
++        DeleteObject(g_status_brush);
++        g_status_brush = nullptr;
++    }
++    if (g_control_brush) {
++        DeleteObject(g_control_brush);
++        g_control_brush = nullptr;
++    }
++    if (g_background_brush) {
++        DeleteObject(g_background_brush);
++        g_background_brush = nullptr;
++    }
+     return static_cast<int>(message.wParam);
+ }
