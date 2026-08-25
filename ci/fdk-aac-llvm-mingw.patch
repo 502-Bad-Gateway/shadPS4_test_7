@@ -1,7 +1,7 @@
-diff --git a/externals/aacdec/fdk-aac/libFDK/include/common_fix.h b/externals/aacdec/fdk-aac/libFDK/include/common_fix.h
+diff --git a/libFDK/include/common_fix.h b/libFDK/include/common_fix.h
 index 8d0dfde33a134db8ef15ad401123372875305079..d74293b4c9c8c4d2d11e1b07047bd1c0978f29c3 100644
---- a/externals/aacdec/fdk-aac/libFDK/include/common_fix.h
-+++ b/externals/aacdec/fdk-aac/libFDK/include/common_fix.h
+--- a/libFDK/include/common_fix.h
++++ b/libFDK/include/common_fix.h
 @@ -406,7 +406,7 @@ FDK_INLINE FIXP_SGL fMax(FIXP_SGL a, FIXP_SGL b) { return fixmax_S(a, b); }
  #if !defined(__LP64__)
  FDK_INLINE INT fMax(INT a, INT b) { return fixmax_I(a, b); }
