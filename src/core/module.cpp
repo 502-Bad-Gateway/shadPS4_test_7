@@ -161,16 +161,7 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             }
 
             // Map module segments
-#ifdef SHADPS4_WINDOWS_7_COMPAT
-            // PS4 ELF segments use 16 KiB boundaries and several segments can occupy one 64 KiB
-            // Windows allocation-granularity block. Map module images as anonymous code pages
-            // inside the SEC_RESERVE guest view so each 16 KiB segment can retain its own
-            // protection. A MapViewOfFileEx-backed flexible mapping would consume the whole host
-            // block and collide with the neighboring segment or trampoline.
-            constexpr auto memory_type = VMAType::Code;
-#else
             const auto memory_type = IsSystemLib() ? VMAType::Code : VMAType::Flexible;
-#endif
             s32 result = memory->MapMemory(&segment_addr, segment_vaddr, segment_size, segment_prot,
                                            MemoryMapFlags::Fixed, memory_type, name);
             ASSERT_MSG(result == ORBIS_OK, "Failed to map segment at {:#x} for module {}",

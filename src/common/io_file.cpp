@@ -12,6 +12,7 @@
 
 #ifdef _WIN32
 #include "common/ntapi.h"
+#include "common/windows_compat.h"
 
 #include <io.h>
 #include <share.h>
@@ -20,7 +21,7 @@
 #include <unistd.h>
 #endif
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #define fileno _fileno
 #define fseeko _fseeki64
 #define ftello _ftelli64
@@ -267,7 +268,12 @@ uintptr_t IOFile::GetFileMapping() {
 
     if (file_access_mode == FileAccessMode::ReadWrite) {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        mapping = CreateFileMappingW(hfile, nullptr, PAGE_READWRITE | SEC_COMMIT, 0, 0, nullptr);
+        if (Common::Windows::SupportsModernMemoryApis()) {
+            mapping = Common::Windows::CreateFileMapping2(hfile, nullptr, FILE_MAP_WRITE,
+                                                          PAGE_READWRITE, SEC_COMMIT, 0, nullptr);
+        } else {
+            mapping = CreateFileMappingW(hfile, nullptr, PAGE_READWRITE | SEC_COMMIT, 0, 0, nullptr);
+        }
 #else
         mapping = CreateFileMapping2(hfile, NULL, FILE_MAP_WRITE, PAGE_READWRITE, SEC_COMMIT, 0,
                                      NULL, NULL, 0);

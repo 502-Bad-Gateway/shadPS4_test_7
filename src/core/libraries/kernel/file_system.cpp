@@ -8,6 +8,7 @@
 #include "common/assert.h"
 #include "common/error.h"
 #include "common/logging/log.h"
+#include "common/path_util.h"
 #include "common/scope_exit.h"
 #include "common/singleton.h"
 #include "core/file_sys/devices/console_device.h"
@@ -158,9 +159,10 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
         }
     } else if (!exists) {
         // If we're not creating a file, and it doesn't exist, return ENOENT
-        h->DeleteHandle(handle);
         *__Error() = POSIX_ENOENT;
-        LOG_ERROR(Kernel_Fs, "Opening path {} failed, file does not exist", raw_path);
+        LOG_ERROR(Kernel_Fs, "Opening path {} failed, file does not exist (resolved host path={})",
+                  raw_path, Common::FS::PathToUTF8String(file->m_host_name));
+        h->DeleteHandle(handle);
         return -1;
     }
 

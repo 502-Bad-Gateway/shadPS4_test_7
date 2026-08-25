@@ -96,6 +96,19 @@ void LogWindows7ExceptionDetails(const EXCEPTION_POINTERS* exception) noexcept {
     } else {
         LOG_CRITICAL(Debug, "No loaded host module contains instruction {}",
                      record->ExceptionAddress);
+
+        // Guest code is mapped directly into the process and therefore is not represented by a
+        // Windows host module. Resolve it against the PS4 module list while a guest thread is
+        // active so crash reports contain a stable module-relative address across ASLR runs.
+        if (Libraries::Kernel::g_curthread != nullptr) {
+            auto* linker = Common::Singleton<Core::Linker>::Instance();
+            if (auto* guest_module = linker->FindByAddress(instruction); guest_module != nullptr) {
+                const auto guest_base = guest_module->GetBaseAddress();
+                LOG_CRITICAL(Debug, "Guest fault module: {} + {:#x} (base={:#x}, size={:#x})",
+                             guest_module->name, instruction - guest_base, guest_base,
+                             guest_module->aligned_base_size);
+            }
+        }
     }
 
 #if defined(_M_X64) || defined(__x86_64__)

@@ -186,8 +186,7 @@ bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
 
     for (auto& vma : vmas_to_write) {
         auto start_in_vma = std::max<VAddr>(virtual_addr, vma.base) - vma.base;
-#ifdef SHADPS4_WINDOWS_7_COMPAT
-        if (vma.type == VMAType::Flexible) {
+        if (impl.IsLegacyBackend() && vma.type == VMAType::Flexible) {
             // Flexible guest pages are anonymous on the Win7 compatibility path, so writes must
             // target the guest view instead of the otherwise-unused canonical physical backing.
             const u64 copy_size = std::min<u64>(size, vma.size - start_in_vma);
@@ -217,7 +216,6 @@ bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
             size -= copy_size;
             continue;
         }
-#endif
         auto phys_handle = std::prev(vma.phys_areas.upper_bound(start_in_vma));
         for (; phys_handle != vma.phys_areas.end(); phys_handle++) {
             if (!size) {
@@ -280,11 +278,11 @@ PAddr MemoryManager::Allocate(PAddr search_start, PAddr search_end, u64 size, u6
                               s32 memory_type) {
     std::scoped_lock lk{mutex, unmap_mutex};
     alignment = alignment > 0 ? alignment : 16_KB;
-#ifdef SHADPS4_WINDOWS_7_COMPAT
-    // MapViewOfFileEx requires section offsets to use the host's 64 KiB allocation granularity.
-    // Returning stronger alignment than the guest requested is valid and keeps aliases mappable.
-    alignment = std::max<u64>(alignment, 64_KB);
-#endif
+    if (impl.IsLegacyBackend()) {
+        // MapViewOfFileEx requires section offsets to use the host's 64 KiB allocation granularity.
+        // Returning stronger alignment than the guest requested is valid and keeps aliases mappable.
+        alignment = std::max<u64>(alignment, 64_KB);
+    }
 
     auto dmem_area = FindDmemArea(search_start);
     auto mapping_start =
@@ -551,11 +549,11 @@ MemoryManager::VMAHandle MemoryManager::CreateArea(VAddr virtual_addr, u64 size,
 s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, MemoryProt prot,
                              MemoryMapFlags flags, VMAType type, std::string_view name,
                              bool validate_dmem, PAddr phys_addr, u64 alignment) {
-#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const bool use_legacy = impl.IsLegacyBackend();
     // Direct mappings must remain section-backed so physical aliases stay coherent.
     // Flexible mappings use anonymous guest pages on Win7: MapViewOfFileEx can otherwise
     // terminate the process while replacing a slice of the emulated address-space view.
-    const bool needs_section_alignment = type == VMAType::Direct;
+    const bool needs_section_alignment = use_legacy && type == VMAType::Direct;
     if (needs_section_alignment && phys_addr != PAddr(-1) && !Common::Is64KBAligned(phys_addr)) {
         LOG_ERROR(Kernel_Vmm,
                   "Windows 7 cannot map physical offset {:#x}; section offsets require 64 KiB "
@@ -571,7 +569,6 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
                   virtual_addr);
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-#endif
     // Certain games perform flexible mappings on loop to determine
     // the available flexible memory size. Questionable but we need to handle this.
     if (type == VMAType::Flexible && flexible_usage + size > total_flexible_size) {
@@ -630,11 +627,9 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
     } else if (False(flags & MemoryMapFlags::Fixed)) {
         // Find a free virtual addr to map
         alignment = alignment > 0 ? alignment : 16_KB;
-#ifdef SHADPS4_WINDOWS_7_COMPAT
         if (needs_section_alignment) {
             alignment = std::max<u64>(alignment, 64_KB);
         }
-#endif
         virtual_addr = virtual_addr == 0 ? DEFAULT_MAPPING_BASE : virtual_addr;
         virtual_addr = SearchFree(virtual_addr, size, alignment);
         if (virtual_addr == -1) {
@@ -685,15 +680,10 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
             MergeAdjacent(new_vma.phys_areas, new_vma.phys_areas.find(current_addr - mapped_addr));
 
             // Perform an address space mapping for each physical area
-#ifdef SHADPS4_WINDOWS_7_COMPAT
-            // Keep the normal flexible-memory physical bookkeeping, usage accounting and query
-            // semantics, but commit the guest range anonymously inside the legacy SEC_RESERVE
-            // view. Flexible memory is not exposed through direct-memory aliases, so it does not
-            // need a MapViewOfFileEx-backed host mapping here.
-            void* out_addr = impl.Map(current_addr, size_to_map, PAddr(-1), is_exec);
-#else
-            void* out_addr = impl.Map(current_addr, size_to_map, new_fmem_area.base, is_exec);
-#endif
+            // Flexible guest pages are anonymous only on the legacy backend. Modern Windows uses
+            // the exact upstream physical backing so Windows 10/11 behavior remains unchanged.
+            const PAddr host_phys_addr = use_legacy ? PAddr(-1) : new_fmem_area.base;
+            void* out_addr = impl.Map(current_addr, size_to_map, host_phys_addr, is_exec);
             // Tracy memory tracking breaks from merging memory areas. Disabled for now.
             // TRACK_ALLOC(out_addr, size_to_map, "VMEM");
 
@@ -831,11 +821,7 @@ s32 MemoryManager::MapFile(void** out_addr, VAddr virtual_addr, u64 size, Memory
         }
     } else if (False(flags & MemoryMapFlags::Fixed)) {
         virtual_addr = virtual_addr == 0 ? DEFAULT_MAPPING_BASE : virtual_addr;
-#ifdef SHADPS4_WINDOWS_7_COMPAT
-        virtual_addr = SearchFree(virtual_addr, size, 64_KB);
-#else
-        virtual_addr = SearchFree(virtual_addr, size, 16_KB);
-#endif
+        virtual_addr = SearchFree(virtual_addr, size, impl.IsLegacyBackend() ? 64_KB : 16_KB);
         if (virtual_addr == -1) {
             // No suitable memory areas to map to
             return ORBIS_KERNEL_ERROR_ENOMEM;

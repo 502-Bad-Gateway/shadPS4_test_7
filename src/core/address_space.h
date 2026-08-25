@@ -84,6 +84,9 @@ public:
     /// Protects requested region.
     void Protect(VAddr virtual_addr, u64 size, MemoryPermission perms);
 
+    /// Returns true when the Windows 7 section-view fallback is active on this host.
+    [[nodiscard]] bool IsLegacyBackend() const noexcept;
+
     // Returns an interval set containing all usable regions.
     boost::icl::interval_set<VAddr> GetUsableRegions();
 

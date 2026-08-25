@@ -9,6 +9,7 @@
 #include "common/assert.h"
 #include "common/elf_info.h"
 #include "common/error.h"
+#include "common/windows_compat.h"
 #include "core/address_space.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/memory.h"
@@ -96,6 +97,49 @@ static u64 BackingSize = ORBIS_KERNEL_TOTAL_MEM_DEV_PRO + ORBIS_KERNEL_FLEXIBLE_
     }
 }
 
+PVOID ModernVirtualAlloc(HANDLE process, PVOID base_address, SIZE_T size, ULONG allocation_type,
+                         ULONG page_protection) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    return Common::Windows::VirtualAlloc2(process, base_address, size, allocation_type,
+                                          page_protection);
+#else
+    return VirtualAlloc2(process, base_address, size, allocation_type, page_protection, nullptr, 0);
+#endif
+}
+
+HANDLE ModernCreateFileMapping(HANDLE file, SECURITY_ATTRIBUTES* security_attributes,
+                               ULONG desired_access, ULONG page_protection,
+                               ULONG allocation_attributes, ULONGLONG maximum_size, PCWSTR name) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    return Common::Windows::CreateFileMapping2(file, security_attributes, desired_access,
+                                               page_protection, allocation_attributes, maximum_size,
+                                               name);
+#else
+    return CreateFileMapping2(file, security_attributes, desired_access, page_protection,
+                              allocation_attributes, maximum_size, name, nullptr, 0);
+#endif
+}
+
+PVOID ModernMapViewOfFile(HANDLE file_mapping, HANDLE process, PVOID base_address,
+                          ULONGLONG offset, SIZE_T view_size, ULONG allocation_type,
+                          ULONG page_protection) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    return Common::Windows::MapViewOfFile3(file_mapping, process, base_address, offset, view_size,
+                                           allocation_type, page_protection);
+#else
+    return MapViewOfFile3(file_mapping, process, base_address, offset, view_size, allocation_type,
+                          page_protection, nullptr, 0);
+#endif
+}
+
+BOOL ModernUnmapViewOfFile(HANDLE process, PVOID base_address, ULONG unmap_flags) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    return Common::Windows::UnmapViewOfFile2(process, base_address, unmap_flags);
+#else
+    return UnmapViewOfFile2(process, base_address, unmap_flags);
+#endif
+}
+
 struct MemoryRegion {
     VAddr base;
     PAddr phys_base;
@@ -146,6 +190,12 @@ struct AddressSpace::Impl {
         allocation_granularity = alignment;
         ASSERT_MSG(allocation_granularity == LegacyAllocationGranularity,
                    "Unexpected Windows allocation granularity {:#x}", allocation_granularity);
+        use_legacy = !Common::Windows::SupportsModernMemoryApis();
+        if (use_legacy) {
+            LOG_INFO(Core, "Windows memory backend: Windows 7 legacy section views");
+        } else {
+            LOG_INFO(Core, "Windows memory backend: modern placeholder APIs (upstream semantics)");
+        }
 #endif
 
         // Older Windows builds have a severe performance issue with VirtualAlloc2.
@@ -210,48 +260,53 @@ struct AddressSpace::Impl {
 
         // Reserve all detected free regions.
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        // Win7 has no placeholder allocations. A large pagefile section created with SEC_RESERVE
-        // provides inaccessible, uncommitted views which can be split and rejoined at the host's
-        // 64 KiB allocation granularity. Mapping each view at its guest-address offset also keeps
-        // subsequently committed anonymous pages unique instead of aliasing every placeholder.
-        const u64 placeholder_size =
-            Common::AlignUp(supported_user_max + allocation_granularity, allocation_granularity);
-        placeholder_handle =
-            CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_RESERVE,
-                               static_cast<DWORD>(placeholder_size >> 32),
-                               static_cast<DWORD>(placeholder_size), nullptr);
-        ASSERT_MSG(placeholder_handle, "Unable to create legacy placeholder section: {}",
-                   Common::GetLastErrorMsg());
-#endif
-#ifdef SHADPS4_WINDOWS_7_COMPAT
+        if (use_legacy) {
+            // Win7 has no placeholder allocations. A large pagefile section created with
+            // SEC_RESERVE provides inaccessible, uncommitted views which can be split and rejoined
+            // at the host's 64 KiB allocation granularity. Mapping each view at its guest-address
+            // offset also keeps subsequently committed anonymous pages unique instead of aliasing
+            // every placeholder.
+            const u64 placeholder_size = Common::AlignUp(
+                supported_user_max + allocation_granularity, allocation_granularity);
+            placeholder_handle = CreateFileMappingW(
+                INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_RESERVE,
+                static_cast<DWORD>(placeholder_size >> 32), static_cast<DWORD>(placeholder_size),
+                nullptr);
+            ASSERT_MSG(placeholder_handle, "Unable to create legacy placeholder section: {}",
+                       Common::GetLastErrorMsg());
+        }
         u64 legacy_placeholder_view_count = 0;
 #endif
         for (auto region : regions) {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-            VAddr view_base = region.second.base;
-            u64 remaining_size = region.second.size;
-            while (remaining_size != 0) {
-                const u64 view_size = std::min(remaining_size, LegacyPlaceholderViewSize);
-                MapLegacyPlaceholderView(view_base, view_size);
-                legacy_placeholder_views.emplace(view_base, view_size);
-                view_base += view_size;
-                remaining_size -= view_size;
-                ++legacy_placeholder_view_count;
+            if (use_legacy) {
+                VAddr view_base = region.second.base;
+                u64 remaining_size = region.second.size;
+                while (remaining_size != 0) {
+                    const u64 view_size = std::min(remaining_size, LegacyPlaceholderViewSize);
+                    MapLegacyPlaceholderView(view_base, view_size);
+                    legacy_placeholder_views.emplace(view_base, view_size);
+                    view_base += view_size;
+                    remaining_size -= view_size;
+                    ++legacy_placeholder_view_count;
+                }
+                continue;
             }
-#else
-            auto addr = static_cast<u8*>(VirtualAlloc2(
+#endif
+            auto addr = static_cast<u8*>(ModernVirtualAlloc(
                 process, reinterpret_cast<PVOID>(region.second.base), region.second.size,
-                MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0));
+                MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS));
             // All marked regions should reserve fine since they're free.
             ASSERT_MSG(addr, "Unable to reserve virtual address space: {}",
                        Common::GetLastErrorMsg());
-#endif
         }
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        LOG_INFO(Core,
-                 "Reserved Windows 7 guest address space in {} legacy views (maximum view size "
-                 "{:#x})",
-                 legacy_placeholder_view_count, LegacyPlaceholderViewSize);
+        if (use_legacy) {
+            LOG_INFO(Core,
+                     "Reserved Windows 7 guest address space in {} legacy views (maximum view "
+                     "size {:#x})",
+                     legacy_placeholder_view_count, LegacyPlaceholderViewSize);
+        }
 #endif
 
         // Set these constants to ensure code relying on them works.
@@ -269,54 +324,62 @@ struct AddressSpace::Impl {
 
         // Allocate backing file that represents the total physical memory.
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        backing_handle = CreateFileMappingW(
-            INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_COMMIT,
-            static_cast<DWORD>(BackingSize >> 32), static_cast<DWORD>(BackingSize), nullptr);
-#else
-        backing_handle = CreateFileMapping2(INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS,
-                                            PAGE_EXECUTE_READWRITE, SEC_COMMIT, BackingSize,
-                                            nullptr, nullptr, 0);
+        if (use_legacy) {
+            backing_handle = CreateFileMappingW(
+                INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_COMMIT,
+                static_cast<DWORD>(BackingSize >> 32), static_cast<DWORD>(BackingSize), nullptr);
+        } else
 #endif
+        {
+            backing_handle = ModernCreateFileMapping(
+                INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS, PAGE_EXECUTE_READWRITE,
+                SEC_COMMIT, BackingSize, nullptr);
+        }
 
         ASSERT_MSG(backing_handle, "{}", Common::GetLastErrorMsg());
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        // The guest ranges have already been reserved, so an automatically placed view cannot
-        // collide with them. This canonical view backs aliased guest mappings.
-        backing_base = static_cast<u8*>(MapViewOfFile(
-            backing_handle, FILE_MAP_ALL_ACCESS | FILE_MAP_EXECUTE, 0, 0, BackingSize));
-        ASSERT_MSG(backing_base, "Unable to map legacy physical backing: {}",
-                   Common::GetLastErrorMsg());
-#else
-        // Allocate a virtual memory for the backing file map as placeholder
-        backing_base = static_cast<u8*>(VirtualAlloc2(process, nullptr, BackingSize,
-                                                      MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
-                                                      PAGE_NOACCESS, nullptr, 0));
-        ASSERT_MSG(backing_base, "{}", Common::GetLastErrorMsg());
-
-        // Map backing placeholder. This will commit the pages
-        void* const ret =
-            MapViewOfFile3(backing_handle, process, backing_base, 0, BackingSize,
-                           MEM_REPLACE_PLACEHOLDER, PAGE_EXECUTE_READWRITE, nullptr, 0);
-        ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
+        if (use_legacy) {
+            // The guest ranges have already been reserved, so an automatically placed view cannot
+            // collide with them. This canonical view backs aliased guest mappings.
+            backing_base = static_cast<u8*>(MapViewOfFile(
+                backing_handle, FILE_MAP_ALL_ACCESS | FILE_MAP_EXECUTE, 0, 0, BackingSize));
+            ASSERT_MSG(backing_base, "Unable to map legacy physical backing: {}",
+                       Common::GetLastErrorMsg());
+        } else
 #endif
+        {
+            // Allocate virtual memory for the backing file map as a placeholder.
+            backing_base = static_cast<u8*>(
+                ModernVirtualAlloc(process, nullptr, BackingSize,
+                                   MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS));
+            ASSERT_MSG(backing_base, "{}", Common::GetLastErrorMsg());
+
+            // Map the backing placeholder. This will commit the pages.
+            void* const ret = ModernMapViewOfFile(
+                backing_handle, process, backing_base, 0, BackingSize, MEM_REPLACE_PLACEHOLDER,
+                PAGE_EXECUTE_READWRITE);
+            ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
+        }
     }
 
     ~Impl() {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        for (const auto& [base, region] : regions) {
-            if (region.is_mapped && IsLegacySectionBacked(region) &&
-                !UnmapViewOfFile(reinterpret_cast<void*>(base))) {
-                LOG_CRITICAL(Core, "Failed to unmap legacy guest section at {:#x}", base);
+        if (use_legacy) {
+            for (const auto& [base, region] : regions) {
+                if (region.is_mapped && IsLegacySectionBacked(region) &&
+                    !UnmapViewOfFile(reinterpret_cast<void*>(base))) {
+                    LOG_CRITICAL(Core, "Failed to unmap legacy guest section at {:#x}", base);
+                }
             }
-        }
-        for (const auto& [base, size] : legacy_placeholder_views) {
-            if (!UnmapViewOfFile(reinterpret_cast<void*>(base))) {
-                LOG_CRITICAL(Core, "Failed to unmap legacy placeholder at {:#x}, size {:#x}", base,
-                             size);
+            for (const auto& [base, size] : legacy_placeholder_views) {
+                if (!UnmapViewOfFile(reinterpret_cast<void*>(base))) {
+                    LOG_CRITICAL(Core, "Failed to unmap legacy placeholder at {:#x}, size {:#x}",
+                                 base, size);
+                }
             }
-        }
-        if (placeholder_handle && !CloseHandle(placeholder_handle)) {
-            LOG_CRITICAL(Core, "Failed to close legacy placeholder section");
+            if (placeholder_handle && !CloseHandle(placeholder_handle)) {
+                LOG_CRITICAL(Core, "Failed to close legacy placeholder section");
+            }
         }
 #endif
         if (virtual_base) {
@@ -326,11 +389,20 @@ struct AddressSpace::Impl {
         }
         if (backing_base) {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-            if (!UnmapViewOfFile(backing_base)) {
-                LOG_CRITICAL(Core, "Failed to unmap legacy physical backing");
+            if (use_legacy) {
+                if (!UnmapViewOfFile(backing_base)) {
+                    LOG_CRITICAL(Core, "Failed to unmap legacy physical backing");
+                }
+            } else {
+                if (!ModernUnmapViewOfFile(process, backing_base, MEM_PRESERVE_PLACEHOLDER)) {
+                    LOG_CRITICAL(Core, "Failed to unmap backing memory placeholder");
+                }
+                if (!VirtualFreeEx(process, backing_base, 0, MEM_RELEASE)) {
+                    LOG_CRITICAL(Core, "Failed to free backing memory");
+                }
             }
 #else
-            if (!UnmapViewOfFile2(process, backing_base, MEM_PRESERVE_PLACEHOLDER)) {
+            if (!ModernUnmapViewOfFile(process, backing_base, MEM_PRESERVE_PLACEHOLDER)) {
                 LOG_CRITICAL(Core, "Failed to unmap backing memory placeholder");
             }
             if (!VirtualFreeEx(process, backing_base, 0, MEM_RELEASE)) {
@@ -618,12 +690,18 @@ struct AddressSpace::Impl {
                 // Allocate the memory for the mapping
                 DWORD resultvar;
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-                ptr = VirtualAlloc(reinterpret_cast<PVOID>(virtual_addr), size, MEM_COMMIT,
-                                   PAGE_READWRITE);
+                if (use_legacy) {
+                    ptr = VirtualAlloc(reinterpret_cast<PVOID>(virtual_addr), size, MEM_COMMIT,
+                                       PAGE_READWRITE);
+                } else {
+                    ptr = ModernVirtualAlloc(
+                        process, reinterpret_cast<PVOID>(virtual_addr), size,
+                        MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
+                }
 #else
-                ptr = VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
-                                    MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER,
-                                    PAGE_READWRITE, nullptr, 0);
+                ptr = ModernVirtualAlloc(
+                    process, reinterpret_cast<PVOID>(virtual_addr), size,
+                    MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
 #endif
 
                 // Use ReadFile to read file contents into the memory area.
@@ -646,45 +724,65 @@ struct AddressSpace::Impl {
                 ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
             } else {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-                ptr = MapLegacySectionView(*region);
-#else
-                if (prot == PAGE_NOACCESS) {
+                if (use_legacy) {
+                    ptr = MapLegacySectionView(*region);
+                } else if (prot == PAGE_NOACCESS) {
                     DWORD resultvar;
-                    ptr = MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
-                                         phys_addr, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE,
-                                         nullptr, 0);
+                    ptr = ModernMapViewOfFile(backing, process,
+                                              reinterpret_cast<PVOID>(virtual_addr), phys_addr,
+                                              size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
                     ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
                     bool ret = VirtualProtect(ptr, size, prot, &resultvar);
                     ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
                 } else {
-                    ptr =
-                        MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
-                                       phys_addr, size, MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
+                    ptr = ModernMapViewOfFile(backing, process,
+                                              reinterpret_cast<PVOID>(virtual_addr), phys_addr,
+                                              size, MEM_REPLACE_PLACEHOLDER, prot);
+                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
+                }
+#else
+                if (prot == PAGE_NOACCESS) {
+                    DWORD resultvar;
+                    ptr = ModernMapViewOfFile(backing, process,
+                                              reinterpret_cast<PVOID>(virtual_addr), phys_addr,
+                                              size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
+                    ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
+                    bool ret = VirtualProtect(ptr, size, prot, &resultvar);
+                    ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
+                } else {
+                    ptr = ModernMapViewOfFile(backing, process,
+                                              reinterpret_cast<PVOID>(virtual_addr), phys_addr,
+                                              size, MEM_REPLACE_PLACEHOLDER, prot);
                     ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
                 }
 #endif
             }
         } else {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-            // Anonymous guest pages are committed directly inside the SEC_RESERVE placeholder
-            // view. Win7 cannot decommit an individual page in such a view, so reused pages are
-            // explicitly zeroed and later hidden with PAGE_NOACCESS.
-            ptr = VirtualAlloc(reinterpret_cast<PVOID>(virtual_addr), size, MEM_COMMIT,
-                               PAGE_READWRITE);
-            ASSERT_MSG(ptr == reinterpret_cast<void*>(virtual_addr),
-                       "Unable to commit legacy anonymous pages at {:#x}, size {:#x}: {}",
-                       virtual_addr, size, Common::GetLastErrorMsg());
-            std::memset(ptr, 0, size);
-            if (prot != PAGE_READWRITE) {
-                DWORD old_protection{};
-                ASSERT_MSG(VirtualProtect(ptr, size, prot, &old_protection),
-                           "Unable to protect legacy anonymous pages at {:#x}, size {:#x}: {}",
+            if (use_legacy) {
+                // Anonymous guest pages are committed directly inside the SEC_RESERVE placeholder
+                // view. Win7 cannot decommit an individual page in such a view, so reused pages are
+                // explicitly zeroed and later hidden with PAGE_NOACCESS.
+                ptr = VirtualAlloc(reinterpret_cast<PVOID>(virtual_addr), size, MEM_COMMIT,
+                                   PAGE_READWRITE);
+                ASSERT_MSG(ptr == reinterpret_cast<void*>(virtual_addr),
+                           "Unable to commit legacy anonymous pages at {:#x}, size {:#x}: {}",
                            virtual_addr, size, Common::GetLastErrorMsg());
+                std::memset(ptr, 0, size);
+                if (prot != PAGE_READWRITE) {
+                    DWORD old_protection{};
+                    ASSERT_MSG(VirtualProtect(ptr, size, prot, &old_protection),
+                               "Unable to protect legacy anonymous pages at {:#x}, size {:#x}: {}",
+                               virtual_addr, size, Common::GetLastErrorMsg());
+                }
+            } else {
+                ptr = ModernVirtualAlloc(
+                    process, reinterpret_cast<PVOID>(virtual_addr), size,
+                    MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot);
             }
 #else
-            ptr =
-                VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
-                              MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
+            ptr = ModernVirtualAlloc(process, reinterpret_cast<PVOID>(virtual_addr), size,
+                                     MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot);
 #endif
         }
         ASSERT_MSG(ptr == reinterpret_cast<void*>(virtual_addr), "{}", Common::GetLastErrorMsg());
@@ -700,17 +798,26 @@ struct AddressSpace::Impl {
 
         bool ret = false;
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        if (IsLegacySectionBacked(*region)) {
-            ret = UnmapViewOfFile(reinterpret_cast<PVOID>(virtual_addr));
+        if (use_legacy) {
+            if (IsLegacySectionBacked(*region)) {
+                ret = UnmapViewOfFile(reinterpret_cast<PVOID>(virtual_addr));
+            } else {
+                DWORD old_protection{};
+                ret = VirtualProtect(reinterpret_cast<PVOID>(virtual_addr), size, PAGE_NOACCESS,
+                                     &old_protection);
+            }
+        } else if ((fd != -1 && prot != PAGE_READONLY) ||
+                   (fd == -1 && phys_base != PAddr(-1))) {
+            ret = ModernUnmapViewOfFile(process, reinterpret_cast<PVOID>(virtual_addr),
+                                        MEM_PRESERVE_PLACEHOLDER);
         } else {
-            DWORD old_protection{};
-            ret = VirtualProtect(reinterpret_cast<PVOID>(virtual_addr), size, PAGE_NOACCESS,
-                                 &old_protection);
+            ret = VirtualFreeEx(process, reinterpret_cast<PVOID>(virtual_addr), size,
+                                MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
         }
 #else
         if ((fd != -1 && prot != PAGE_READONLY) || (fd == -1 && phys_base != -1)) {
-            ret = UnmapViewOfFile2(process, reinterpret_cast<PVOID>(virtual_addr),
-                                   MEM_PRESERVE_PLACEHOLDER);
+            ret = ModernUnmapViewOfFile(process, reinterpret_cast<PVOID>(virtual_addr),
+                                        MEM_PRESERVE_PLACEHOLDER);
         } else {
             ret = VirtualFreeEx(process, reinterpret_cast<PVOID>(virtual_addr), size,
                                 MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
@@ -722,51 +829,56 @@ struct AddressSpace::Impl {
 
     void SplitRegion(VAddr virtual_addr, u64 size) {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        auto it = std::prev(regions.upper_bound(virtual_addr));
-        const MemoryRegion original = it->second;
-        const VAddr original_end = original.base + original.size;
-        const VAddr requested_end = virtual_addr + size;
-        ASSERT_MSG(requested_end <= original_end, "Cannot fit region into one reservation");
+        if (use_legacy) {
+            auto it = std::prev(regions.upper_bound(virtual_addr));
+            const MemoryRegion original = it->second;
+            const VAddr original_end = original.base + original.size;
+            const VAddr requested_end = virtual_addr + size;
+            ASSERT_MSG(requested_end <= original_end, "Cannot fit region into one reservation");
 
-        // Allocate every bookkeeping node before changing any section view. Anonymous mappings
-        // remain committed inside their placeholder view and therefore need no host-side split.
-        auto target = it;
-        if (original.base != virtual_addr) {
-            it->second.size = virtual_addr - original.base;
-            const PAddr target_phys_base =
-                original.is_mapped ? original.phys_base + it->second.size : PAddr(-1);
-            target = regions.emplace_hint(std::next(it), virtual_addr,
-                                          MemoryRegion{virtual_addr, target_phys_base,
-                                                       original_end - virtual_addr, original.prot,
-                                                       original.fd, original.is_mapped});
-        }
-
-        if (target->second.size != size) {
-            const PAddr next_phys_base =
-                original.is_mapped ? target->second.phys_base + size : PAddr(-1);
-            regions.emplace_hint(std::next(target), requested_end,
-                                 MemoryRegion{requested_end, next_phys_base,
-                                              original_end - requested_end, original.prot,
-                                              original.fd, original.is_mapped});
-            target->second.size = size;
-        }
-
-        if (original.is_mapped && IsLegacySectionBacked(original)) {
-            ASSERT_MSG(Common::Is64KBAligned(original.base) &&
-                           Common::Is64KBAligned(virtual_addr) &&
-                           (requested_end == original_end || Common::Is64KBAligned(requested_end)),
-                       "Windows 7 cannot split a section-backed mapping at a 16 KiB-only "
-                       "boundary: mapping={:#x}-{:#x}, split={:#x}-{:#x}",
-                       original.base, original_end, virtual_addr, requested_end);
-
-            const auto first_segment = regions.lower_bound(original.base);
-            UnmapRegion(&original);
-            for (auto segment = first_segment;
-                 segment != regions.end() && segment->first < original_end; ++segment) {
-                MapRegion(&segment->second);
+            // Allocate every bookkeeping node before changing any section view. Anonymous mappings
+            // remain committed inside their placeholder view and therefore need no host-side split.
+            auto target = it;
+            if (original.base != virtual_addr) {
+                it->second.size = virtual_addr - original.base;
+                const PAddr target_phys_base =
+                    original.is_mapped ? original.phys_base + it->second.size : PAddr(-1);
+                target = regions.emplace_hint(std::next(it), virtual_addr,
+                                              MemoryRegion{virtual_addr, target_phys_base,
+                                                           original_end - virtual_addr,
+                                                           original.prot, original.fd,
+                                                           original.is_mapped});
             }
+
+            if (target->second.size != size) {
+                const PAddr next_phys_base =
+                    original.is_mapped ? target->second.phys_base + size : PAddr(-1);
+                regions.emplace_hint(std::next(target), requested_end,
+                                     MemoryRegion{requested_end, next_phys_base,
+                                                  original_end - requested_end, original.prot,
+                                                  original.fd, original.is_mapped});
+                target->second.size = size;
+            }
+
+            if (original.is_mapped && IsLegacySectionBacked(original)) {
+                ASSERT_MSG(
+                    Common::Is64KBAligned(original.base) &&
+                        Common::Is64KBAligned(virtual_addr) &&
+                        (requested_end == original_end || Common::Is64KBAligned(requested_end)),
+                    "Windows 7 cannot split a section-backed mapping at a 16 KiB-only "
+                    "boundary: mapping={:#x}-{:#x}, split={:#x}-{:#x}",
+                    original.base, original_end, virtual_addr, requested_end);
+
+                const auto first_segment = regions.lower_bound(original.base);
+                UnmapRegion(&original);
+                for (auto segment = first_segment;
+                     segment != regions.end() && segment->first < original_end; ++segment) {
+                    MapRegion(&segment->second);
+                }
+            }
+            return;
         }
-#else
+#endif
         // First, get the region this range covers
         auto it = std::prev(regions.upper_bound(virtual_addr));
 
@@ -850,7 +962,6 @@ struct AddressSpace::Impl {
         if (it->second.is_mapped) {
             MapRegion(&it->second);
         }
-#endif
     }
 
     void* Map(VAddr virtual_addr, PAddr phys_addr, u64 size, ULONG prot, s32 fd = -1) {
@@ -874,29 +985,31 @@ struct AddressSpace::Impl {
         region.prot = prot;
         region.fd = fd;
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        EnsureLegacyPlaceholderRange(region.base, region.size);
-        if (IsLegacySectionBacked(region)) {
-            ASSERT_MSG(Common::Is64KBAligned(region.base) &&
-                           Common::Is64KBAligned(region.phys_base),
-                       "Windows 7 section mappings require a 64 KiB-aligned virtual address and "
-                       "physical offset: virtual={:#x}, physical={:#x}, size={:#x}",
-                       region.base, region.phys_base, region.size);
-            const u64 host_size =
-                Common::AlignUp(region.size, static_cast<std::size_t>(allocation_granularity));
-            const VAddr padding_base = region.base + region.size;
-            const VAddr padding_end = region.base + host_size;
-            if (padding_base != padding_end) {
-                auto padding = std::prev(regions.upper_bound(padding_base));
-                for (; padding != regions.end() && padding->first < padding_end; ++padding) {
-                    ASSERT_MSG(!padding->second.is_mapped,
-                               "Windows 7 host-allocation padding overlaps a guest mapping at "
-                               "{:#x}-{:#x}",
-                               padding_base, padding_end);
+        if (use_legacy) {
+            EnsureLegacyPlaceholderRange(region.base, region.size);
+            if (IsLegacySectionBacked(region)) {
+                ASSERT_MSG(Common::Is64KBAligned(region.base) &&
+                               Common::Is64KBAligned(region.phys_base),
+                           "Windows 7 section mappings require a 64 KiB-aligned virtual address "
+                           "and physical offset: virtual={:#x}, physical={:#x}, size={:#x}",
+                           region.base, region.phys_base, region.size);
+                const u64 host_size =
+                    Common::AlignUp(region.size, static_cast<std::size_t>(allocation_granularity));
+                const VAddr padding_base = region.base + region.size;
+                const VAddr padding_end = region.base + host_size;
+                if (padding_base != padding_end) {
+                    auto padding = std::prev(regions.upper_bound(padding_base));
+                    for (; padding != regions.end() && padding->first < padding_end; ++padding) {
+                        ASSERT_MSG(!padding->second.is_mapped,
+                                   "Windows 7 host-allocation padding overlaps a guest mapping at "
+                                   "{:#x}-{:#x}",
+                                   padding_base, padding_end);
+                    }
                 }
+                // Win7 has no atomic placeholder replacement operation. All map nodes have already
+                // been allocated, and the exact target view is installed immediately after release.
+                return ReplaceLegacyPlaceholderWithSection(&region, host_size);
             }
-            // Win7 has no atomic placeholder replacement operation. All map nodes have already
-            // been allocated, and the exact target view is installed immediately after release.
-            return ReplaceLegacyPlaceholderWithSection(&region, host_size);
         }
 #endif
         return MapRegion(&region);
@@ -904,28 +1017,31 @@ struct AddressSpace::Impl {
 
     void CoalesceFreeRegions(VAddr virtual_addr) {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-        auto it = std::prev(regions.upper_bound(virtual_addr));
-        ASSERT_MSG(!it->second.is_mapped, "Cannot coalesce mapped regions");
+        if (use_legacy) {
+            auto it = std::prev(regions.upper_bound(virtual_addr));
+            ASSERT_MSG(!it->second.is_mapped, "Cannot coalesce mapped regions");
 
-        while (it != regions.begin()) {
-            const auto previous = std::prev(it);
-            if (previous->second.is_mapped ||
-                previous->first + previous->second.size != it->first) {
-                break;
+            while (it != regions.begin()) {
+                const auto previous = std::prev(it);
+                if (previous->second.is_mapped ||
+                    previous->first + previous->second.size != it->first) {
+                    break;
+                }
+                previous->second.size += it->second.size;
+                regions.erase(it);
+                it = previous;
             }
-            previous->second.size += it->second.size;
-            regions.erase(it);
-            it = previous;
-        }
 
-        auto next = std::next(it);
-        while (next != regions.end() && !next->second.is_mapped &&
-               it->first + it->second.size == next->first) {
-            it->second.size += next->second.size;
-            regions.erase(next);
-            next = std::next(it);
+            auto next = std::next(it);
+            while (next != regions.end() && !next->second.is_mapped &&
+                   it->first + it->second.size == next->first) {
+                it->second.size += next->second.size;
+                regions.erase(next);
+                next = std::next(it);
+            }
+            return;
         }
-#else
+#endif
         // First, get the region to update
         auto it = std::prev(regions.upper_bound(virtual_addr));
         ASSERT_MSG(!it->second.is_mapped, "Cannot coalesce mapped regions");
@@ -969,7 +1085,6 @@ struct AddressSpace::Impl {
                 UNREACHABLE_MSG("Region coalescing failed: {}", Common::GetLastErrorMsg());
             }
         }
-#endif
     }
 
     void Unmap(VAddr virtual_addr, u64 size) {
@@ -996,7 +1111,7 @@ struct AddressSpace::Impl {
             // Unmap the region if it was previously mapped
             if (region.is_mapped) {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-                const bool section_backed = IsLegacySectionBacked(region);
+                const bool section_backed = use_legacy && IsLegacySectionBacked(region);
                 if (section_backed) {
                     // Allocate the map node while the section view still owns the address.
                     const u64 host_size = Common::AlignUp(
@@ -1097,10 +1212,19 @@ struct AddressSpace::Impl {
         return reserved_regions;
     }
 
+    [[nodiscard]] bool IsLegacyBackend() const noexcept {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        return use_legacy;
+#else
+        return false;
+#endif
+    }
+
     std::mutex mutex;
     HANDLE process{};
     HANDLE backing_handle{};
 #ifdef SHADPS4_WINDOWS_7_COMPAT
+    bool use_legacy{};
     HANDLE placeholder_handle{};
     u64 allocation_granularity{};
     std::map<VAddr, u64> legacy_placeholder_views;
@@ -1378,6 +1502,14 @@ void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms)
     const bool write = True(perms & MemoryPermission::Write);
     const bool execute = True(perms & MemoryPermission::Execute);
     return impl->Protect(virtual_addr, size, read, write, execute);
+}
+
+bool AddressSpace::IsLegacyBackend() const noexcept {
+#ifdef _WIN32
+    return impl->IsLegacyBackend();
+#else
+    return false;
+#endif
 }
 
 boost::icl::interval_set<VAddr> AddressSpace::GetUsableRegions() {
