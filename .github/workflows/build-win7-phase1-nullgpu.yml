@@ -6,6 +6,8 @@ on:
     paths:
       - run-win7-phase1-ci.ps1
       - build-win7-phase1.ps1
+      - apply-launcher-dark-theme.ps1
+      - launcher-dark-theme.patch
       - ci-payload/**
       - .github/workflows/build-win7-phase1-nullgpu.yml
   workflow_dispatch:
