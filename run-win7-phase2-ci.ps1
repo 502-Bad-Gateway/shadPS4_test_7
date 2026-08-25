@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-Write-Host 'Phase-2 CI controller revision: 1'
+Write-Host 'Phase-2 CI controller revision: 2'
 
 $ExpectedPayloadSha256 = '1316be1085285763f3c1de985b34201d17372d06f72ded29ebd1a1c0ddad1e2a'
 $ExpectedPhase2PayloadSha256 = '40ff57a75e20faa30fd41d872663575c40044c28a7b67f47ee01b46430e2a6ea'
@@ -38,8 +38,8 @@ if ($ActualHash -ne $ExpectedPayloadSha256) {
 
 Write-Host '=== Reconstructing audited proven-V17 Phase-2 payload ==='
 $Phase2Chunks = @(Get-ChildItem -Path $Phase2ChunkDir -File -Filter 'part*.txt' | Sort-Object Name)
-if ($Phase2Chunks.Count -ne 11) {
-    throw "Expected exactly 11 Phase-2 payload chunks, found $($Phase2Chunks.Count)"
+if ($Phase2Chunks.Count -ne 2) {
+    throw "Expected exactly 2 Phase-2 payload chunks, found $($Phase2Chunks.Count)"
 }
 
 $Phase2Base64 = ($Phase2Chunks | ForEach-Object { (Get-Content -Raw $_.FullName).Trim() }) -join ''
