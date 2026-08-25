@@ -2,29 +2,28 @@ name: Build shadPS4 Win7 Phase 1 NullGPU
 
 on:
   push:
-    branches: [win7-phase1-nullgpu]
+    branches: [Pre-release-shadPS4-win7-phase1-nullgpu]
     paths:
       - build-win7-phase1.ps1
-      - phase1-ci-payload.zip
-      - .github/workflows/build-win7-phase1-nullgpu.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  build-win7-x64:
+    name: Build Windows 7 x64 Target
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - name: Checkout build controller
         uses: actions/checkout@v4
 
-      - name: Build exact Win7 Phase 1 binary
+      - name: Build exact Windows 7 Phase 1 binary
         shell: pwsh
         run: .\build-win7-phase1.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE\artifact"
 
-      - name: Upload runnable artifact
+      - name: Upload Windows 7 runnable artifact
         uses: actions/upload-artifact@v4
         with:
           name: shadps4-win7-phase1-nullgpu-7fb1a530
