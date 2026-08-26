@@ -1,0 +1,41 @@
+name: Apply Win7 dumb GPU phase 1
+
+on:
+  push:
+    branches: [win7-v1-dumb-gpu]
+    paths:
+      - .github/scripts/apply-win7-dumb-gpu-phase1.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: win7-v1-dumb-gpu
+
+      - name: Apply guarded source patch
+        run: python3 .github/scripts/apply-win7-dumb-gpu-phase1.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          git status --short
+
+      - name: Commit patched source
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No source changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src .github/workflows/build-win7-v1-compat-only.yml
+          git commit -m "video_core: add Win7 dumb GPU phase 1 fallbacks"
+          git push origin HEAD:win7-v1-dumb-gpu
