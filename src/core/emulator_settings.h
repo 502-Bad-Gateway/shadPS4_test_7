@@ -431,13 +431,7 @@ struct GPUSettings {
     Setting<u32> window_height{720};
     Setting<u32> internal_screen_width{1280};
     Setting<u32> internal_screen_height{720};
-    Setting<bool> null_gpu{
-#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
-        true
-#else
-        false
-#endif
-    };
+    Setting<bool> null_gpu{false};
     Setting<bool> copy_gpu_buffers{false};
     Setting<u32> readbacks_mode{GpuReadbacksMode::Disabled};
     Setting<bool> readback_linear_images_enabled{false};
@@ -626,11 +620,6 @@ private:
     }
 
     static void PrintChangedSummary(const std::vector<std::string>& changed);
-
-#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
-    // Make the compatibility-only test mode immune to stale global and per-game overrides.
-    void ApplyWindows7CompatibilityOnlyDefaults();
-#endif
 
 public:
     // Add these getters to access overrideable fields

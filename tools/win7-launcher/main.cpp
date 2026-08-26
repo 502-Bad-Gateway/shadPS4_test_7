@@ -358,7 +358,7 @@ json DefaultConfig() {
     "hdr_allowed": false,
     "internal_screen_height": 720,
     "internal_screen_width": 1280,
-    "null_gpu": true,
+    "null_gpu": false,
     "patch_shaders": false,
     "present_mode": "Mailbox",
     "rcas_attenuation": 250,
@@ -829,7 +829,7 @@ void UpdateDetectedLabel() {
     bool null_gpu = false;
     try {
         if (g_effective_config.contains("GPU") && g_effective_config["GPU"].is_object()) {
-            null_gpu = g_effective_config["GPU"].value("null_gpu", true);
+            null_gpu = g_effective_config["GPU"].value("null_gpu", false);
         }
     } catch (...) {
     }
@@ -1429,7 +1429,7 @@ void LaunchGame() {
 
     bool null_gpu = false;
     try {
-        null_gpu = g_effective_config["GPU"].value("null_gpu", true);
+        null_gpu = g_effective_config["GPU"].value("null_gpu", false);
     } catch (...) {
     }
     const std::wstring mode = null_gpu ? L"nullgpu" : L"vulkan";

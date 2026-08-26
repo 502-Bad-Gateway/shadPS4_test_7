@@ -1,31 +1,31 @@
 # Windows 7 V1: compatibility-only validation
 
-This branch is the first isolation build for the Windows 7 work. It starts from
-upstream shadPS4 commit `7fb1a530c15415097836521fec6f3483e27c81ae` and carries
-only the Windows/CRT portability and legacy address-space changes needed to
-run the emulator on Windows 7.
+This branch starts from upstream shadPS4 commit
+`7fb1a530c15415097836521fec6f3483e27c81ae` and carries the Windows/CRT
+portability, legacy address-space support, and Vulkan 1.2 host-presenter bridge
+needed for Windows 7 validation.
 
-The Vulkan renderer and shader-recompiler experiments are intentionally absent.
-The build defaults to the NullGPU path so a game reaching its in-game state is
-evidence about Windows 7 compatibility, not about Vulkan support.
+Guest GPU/Vulkan experiments remain intentionally absent. The current
+settings-precedence axis defaults to the Vulkan path so the launcher and
+emulator can prove that explicit global and per-game choices are honored.
 
-## Effective defaults
+## Effective defaults and overrides
 
 When `ENABLE_WINDOWS_7_COMPAT=ON`, CMake defaults
-`ENABLE_WINDOWS_7_COMPAT_ONLY=ON`. The compatibility-only build forces these
-effective settings after loading both global and per-game configuration:
+`ENABLE_WINDOWS_7_COMPAT_ONLY=ON`. That mode supplies these factory defaults:
 
 ```text
-null_gpu=true
+null_gpu=false
 show_fps_counter=true
 show_splash=true
 ```
 
-This also prevents stale `config.json` or per-game profiles from silently
-switching a test back to Vulkan. A later GPU/Vulkan phase can explicitly pass
-`-DENABLE_WINDOWS_7_COMPAT_ONLY=OFF`.
+These are defaults, not forced runtime values. The emulator honors explicit
+global configuration and per-game overrides after loading them. At game start,
+the log reports the final effective values with the marker
+`Windows 7 compatibility-only settings active`.
 
-## Required game checks
+## Required checks
 
 | Game | Title ID |
 | --- | --- |
@@ -35,14 +35,18 @@ switching a test back to Vulkan. A later GPU/Vulkan phase can explicitly pass
 | Wipeout Omega Collection | CUSA05670 |
 | We Are Doomed (control) | CUSA02394 |
 
-The success criterion is reaching the normal in-game state with the log
-reporting `GPU isNullGpu: true`. A Vulkan crash, pipeline workaround, or
-renderer assertion is outside this phase and must not be used to judge this
-build.
+For the settings-axis acceptance test, confirm the startup marker reports the
+requested `null_gpu` value for the factory default, global setting, and
+per-game override. Re-run Bloodborne and Driveclub with `null_gpu=true` as
+regression controls for the completed compatibility milestone.
+
+Only results whose startup marker reports `null_gpu=false` may be used to
+judge guest GPU/Vulkan behavior.
 
 ## Build
 
-The dedicated GitHub Actions workflow builds with llvm-mingw 20260616
-(LLVM/Clang 22.1.8), x86-64-v3, and a Windows 7 PE target. It uploads the
-emulator, the small Windows 7 launcher, runtime DLLs, PE import audit, and the
-build identity file as one artifact.
+The dedicated GitHub Actions workflow builds the emulator with clang-cl using
+the MSVC/UCRT ABI and target `x86_64-pc-windows-msvc`. The small Windows 7
+launcher remains a separate static LLVM-MinGW/MSVCRT executable. The workflow
+uses `x86-64-v3` and uploads both executables, PE/import audits, compiler
+identity, hashes, and build identity as one artifact.

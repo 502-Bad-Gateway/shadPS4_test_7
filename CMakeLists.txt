@@ -47,7 +47,7 @@ if (ENABLE_WINDOWS_7_COMPAT)
     set(_windows7_compat_only_default ON)
 endif()
 option(ENABLE_WINDOWS_7_COMPAT_ONLY
-       "Force the Windows 7 compatibility-only test defaults (null GPU, FPS counter, splash)"
+       "Enable the Windows 7 compatibility-only defaults (FPS counter and splash)"
        ${_windows7_compat_only_default})
 
 if (ENABLE_WINDOWS_7_COMPAT AND NOT WIN32)

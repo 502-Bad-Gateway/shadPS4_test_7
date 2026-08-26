@@ -1,4 +1,4 @@
-name: Build shadPS4 Win7 V1 Vulkan 1.2 presenter
+name: Build shadPS4 Win7 V1 settings override
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 Vulkan 1.2 presenter target
+    name: Build Windows 7 x64 settings-override target
     runs-on: windows-2022
     timeout-minutes: 120
 
@@ -68,7 +68,7 @@ jobs:
             -Uri 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' `
             -OutFile (Join-Path $jsonDir 'json.hpp')
 
-      - name: Configure Windows 7 Vulkan 1.2 presenter build
+      - name: Configure Windows 7 settings-override build
         shell: pwsh
         run: |
           $env:SOURCE_DATE_EPOCH = '0'
@@ -161,8 +161,7 @@ jobs:
 
           $stringsTool = Join-Path $env:LLVM_MINGW_ROOT 'bin/llvm-strings.exe'
           $strings = (& $stringsTool (Join-Path $output 'shadps4.exe') | Out-String)
-          foreach ($required in @('Windows 7 compatibility-only defaults active',
-                                  'Windows 7 compatibility-only test build',
+          foreach ($required in @('Windows 7 compatibility-only settings active',
                                   'Windows 7 Vulkan 1.2 presenter compatibility active')) {
               if (!$strings.Contains($required)) { throw "Required marker missing: $required" }
           }
@@ -176,12 +175,12 @@ jobs:
           lineage=clean-upstream-7fb1a530
           upstream_commit=7fb1a530c15415097836521fec6f3483e27c81ae
           phase=windows7-compatibility-only-v1
-          single_axis=vulkan12-presenter-nullgpu
+          single_axis=settings-precedence-nullgpu-default-false
           emulator_toolchain=clang-cl-msvc-ucrt
           emulator_target=x86_64-pc-windows-msvc
           launcher_toolchain=llvm-mingw-20260616-msvcrt-x86_64-static
           cpu=x86-64-v3
-          null_gpu_default=true
+          null_gpu_default=false
           show_splash_default=true
           show_fps_counter_default=true
           vulkan_compat_scope=presenter-only
@@ -196,10 +195,10 @@ jobs:
               } | Sort-Object)
           $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
 
-      - name: Upload Windows 7 V1 Vulkan 1.2 presenter artifact
+      - name: Upload Windows 7 V1 settings-override artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shadps4-win7-v1-vulkan12-presenter-${{ github.sha }}
+          name: shadps4-win7-v1-settings-override-${{ github.sha }}
           path: artifact/
           if-no-files-found: error
           retention-days: 30

@@ -433,8 +433,10 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     EmulatorSettings.Load(id);
 #ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
     LOG_INFO(Config,
-             "Windows 7 compatibility-only test build: guest GPU processing is disabled for this "
-             "game; the Vulkan presenter may still initialize");
+             "Windows 7 compatibility-only settings active: null_gpu={}, "
+             "show_fps_counter={}, show_splash={}",
+             EmulatorSettings.IsNullGPU(), EmulatorSettings.IsShowFpsCounter(),
+             EmulatorSettings.IsShowSplash());
 #endif
     // Windows static guest red-zone protection
     WindowsGuestRedZoneProtection::SetActiveMode(

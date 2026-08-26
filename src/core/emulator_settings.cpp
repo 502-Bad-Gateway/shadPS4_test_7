@@ -436,9 +436,6 @@ bool EmulatorSettingsImpl::Load(const std::string& serial) {
             if (GetConfigVersion() != Common::g_scm_rev) {
                 Save();
             }
-#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
-            ApplyWindows7CompatibilityOnlyDefaults();
-#endif
             m_loaded = true;
             return true;
         } else {
@@ -487,9 +484,6 @@ bool EmulatorSettingsImpl::Load(const std::string& serial) {
                 ApplyGroupOverrides(m_vulkan, gj.at("Vulkan"), changed);
 
             PrintChangedSummary(changed);
-#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
-            ApplyWindows7CompatibilityOnlyDefaults();
-#endif
             EmulatorState::GetInstance()->SetGameSpecifigConfigUsed(true);
             return true;
         }
@@ -510,23 +504,6 @@ void EmulatorSettingsImpl::SetDefaultValues() {
     m_gpu = GPUSettings{};
     m_vulkan = VulkanSettings{};
 }
-
-#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
-void EmulatorSettingsImpl::ApplyWindows7CompatibilityOnlyDefaults() {
-    // Clear per-game overrides as well as changing the base value. Otherwise a legacy profile
-    // containing null_gpu=false would win through Setting::get(ConfigMode::Default).
-    m_general.show_splash.value = true;
-    m_general.show_splash.game_specific_value.reset();
-    m_general.show_fps_counter.value = true;
-    m_general.show_fps_counter.game_specific_value.reset();
-    m_gpu.null_gpu.value = true;
-    m_gpu.null_gpu.game_specific_value.reset();
-
-    LOG_INFO(Config,
-             "Windows 7 compatibility-only defaults active: null_gpu=true, "
-             "show_fps_counter=true, show_splash=true");
-}
-#endif
 
 bool EmulatorSettingsImpl::TransferSettings() {
     toml::value og_data;
