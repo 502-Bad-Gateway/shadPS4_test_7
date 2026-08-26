@@ -251,7 +251,14 @@ vk::RenderPass Instance::GetLegacyRenderPassLocked(const LegacyRenderPassKey& ke
         .subpassCount = 1,
         .pSubpasses = &subpass,
     };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto forensic_event = Win7Forensics::Begin(
+        "create_legacy_render_pass", fmt::format("attachments={}", attachments.size()));
+#endif
     auto [result, render_pass] = device->createRenderPassUnique(create_info);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(forensic_event, "create_legacy_render_pass", vk::to_string(result));
+#endif
     ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create legacy render pass: {}",
                vk::to_string(result));
     const auto handle = *render_pass;

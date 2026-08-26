@@ -32,11 +32,24 @@ void Pipeline::BindResources(DescriptorWrites& set_writes, const BufferBarriers&
             .pBufferMemoryBarriers = buffer_barriers.data(),
         };
         scheduler.EndRendering();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        const auto forensic_event = Win7Forensics::Begin(
+            "cmd_pipeline_barrier2", fmt::format("buffers={}", buffer_barriers.size()));
+#endif
         cmdbuf.pipelineBarrier2(dependencies);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        Win7Forensics::End(forensic_event, "cmd_pipeline_barrier2", "recorded");
+#endif
     }
 
     const auto stage_flags = IsCompute() ? vk::ShaderStageFlagBits::eCompute : AllGraphicsStageBits;
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto push_constant_event = Win7Forensics::Begin("cmd_push_constants");
+#endif
     cmdbuf.pushConstants(*pipeline_layout, stage_flags, 0u, sizeof(push_data), &push_data);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(push_constant_event, "cmd_push_constants", "recorded");
+#endif
 
     // Bind descriptor set.
     if (set_writes.empty()) {
@@ -44,7 +57,14 @@ void Pipeline::BindResources(DescriptorWrites& set_writes, const BufferBarriers&
     }
 
     if (uses_push_descriptors) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        const auto forensic_event = Win7Forensics::Begin(
+            "cmd_push_descriptor_set", fmt::format("writes={}", set_writes.size()));
+#endif
         cmdbuf.pushDescriptorSetKHR(bind_point, *pipeline_layout, 0, set_writes);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        Win7Forensics::End(forensic_event, "cmd_push_descriptor_set", "recorded");
+#endif
         return;
     }
 
@@ -53,7 +73,14 @@ void Pipeline::BindResources(DescriptorWrites& set_writes, const BufferBarriers&
         set_write.dstSet = desc_set;
     }
     instance.GetDevice().updateDescriptorSets(set_writes, {});
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto forensic_event = Win7Forensics::Begin(
+        "cmd_bind_descriptor_sets", fmt::format("writes={}", set_writes.size()));
+#endif
     cmdbuf.bindDescriptorSets(bind_point, *pipeline_layout, 0, desc_set, {});
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(forensic_event, "cmd_bind_descriptor_sets", "recorded");
+#endif
 }
 
 std::string Pipeline::GetDebugString() const {

@@ -432,6 +432,15 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     EmulatorSettings.Load(id);
 #ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+    // The dedicated pipeline-forensics build must not inherit a saved false value: the
+    // validation layer is part of this diagnostic axis, not a user-configurable renderer change.
+    EmulatorSettings.SetVkValidationEnabled(true);
+    EmulatorSettings.SetVkValidationEnabled(true, true);
+    EmulatorSettings.SetVkValidationCoreEnabled(true);
+    EmulatorSettings.SetVkValidationCoreEnabled(true, true);
+    LOG_WARNING(Config,
+                "Windows 7 pipeline-forensics build forces vkValidation=true and "
+                "vkValidationCore=true for diagnostics");
     LOG_INFO(Config,
              "Windows 7 compatibility-only settings active: null_gpu={}, "
              "show_fps_counter={}, show_splash={}",

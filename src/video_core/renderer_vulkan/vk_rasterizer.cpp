@@ -221,7 +221,18 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     const auto [vertex_offset, instance_offset] = GetDrawOffsets(regs, vs_info, fetch_shader);
 
     const auto cmdbuf = scheduler.CommandBuffer();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(pipeline->GetGraphicsKey());
+    const auto bind_event = Win7Forensics::Begin(
+        "cmd_bind_graphics_pipeline", fmt::format("pipeline={:#x}", pipeline_hash));
+#endif
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(bind_event, "cmd_bind_graphics_pipeline", "recorded");
+    const auto draw_event = Win7Forensics::Begin(
+        is_indexed ? "cmd_draw_indexed" : "cmd_draw",
+        fmt::format("pipeline={:#x}", pipeline_hash));
+#endif
 
     if (is_indexed) {
         cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0,
@@ -230,6 +241,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         cmdbuf.draw(regs.num_indices, regs.num_instances.NumInstances(), vertex_offset,
                     instance_offset);
     }
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(draw_event, is_indexed ? "cmd_draw_indexed" : "cmd_draw", "recorded");
+#endif
     DebugState.IncDrawCall();
 
     ResetBindings();
@@ -289,7 +303,18 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     // instance offsets will be automatically applied by Vulkan from indirect args buffer.
 
     const auto cmdbuf = scheduler.CommandBuffer();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(pipeline->GetGraphicsKey());
+    const auto bind_event = Win7Forensics::Begin(
+        "cmd_bind_graphics_pipeline", fmt::format("pipeline={:#x}", pipeline_hash));
+#endif
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(bind_event, "cmd_bind_graphics_pipeline", "recorded");
+    const auto draw_event = Win7Forensics::Begin(
+        is_indexed ? "cmd_draw_indexed_indirect" : "cmd_draw_indirect",
+        fmt::format("pipeline={:#x}", pipeline_hash));
+#endif
 
     if (is_indexed) {
         ASSERT(sizeof(VkDrawIndexedIndirectCommand) == stride);
@@ -312,6 +337,10 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         }
         DebugState.IncDrawCall();
     }
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(draw_event, is_indexed ? "cmd_draw_indexed_indirect" : "cmd_draw_indirect",
+                       "recorded");
+#endif
 
     ResetBindings();
 }
@@ -340,8 +369,18 @@ void Rasterizer::DispatchDirect() {
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
 
     const auto cmdbuf = scheduler.CommandBuffer();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto bind_event = Win7Forensics::Begin("cmd_bind_compute_pipeline");
+#endif
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(bind_event, "cmd_bind_compute_pipeline", "recorded");
+    const auto dispatch_event = Win7Forensics::Begin("cmd_dispatch");
+#endif
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(dispatch_event, "cmd_dispatch", "recorded");
+#endif
     DebugState.IncDispatch();
 
     ResetBindings();
@@ -373,8 +412,18 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
 
     const auto cmdbuf = scheduler.CommandBuffer();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto bind_event = Win7Forensics::Begin("cmd_bind_compute_pipeline");
+#endif
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(bind_event, "cmd_bind_compute_pipeline", "recorded");
+    const auto dispatch_event = Win7Forensics::Begin("cmd_dispatch_indirect");
+#endif
     cmdbuf.dispatchIndirect(buffer->Handle(), base);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(dispatch_event, "cmd_dispatch_indirect", "recorded");
+#endif
     DebugState.IncDispatch();
 
     ResetBindings();
@@ -1158,7 +1207,13 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline, const bool
     UpdateColorBlendingState(pipeline);
 
     auto& dynamic_state = scheduler.GetDynamicState();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto forensic_event = Win7Forensics::Begin("cmd_dynamic_state_commit");
+#endif
     dynamic_state.Commit(instance, scheduler.CommandBuffer());
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(forensic_event, "cmd_dynamic_state_commit", "recorded");
+#endif
 }
 
 void Rasterizer::UpdateViewportScissorState() const {

@@ -106,8 +106,14 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         .stage = shader_ci,
         .layout = *pipeline_layout,
     };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto forensic_event = Win7Forensics::Begin("create_compute_pipeline", debug_str);
+#endif
     auto [pipeline_result, pipe] =
         instance.GetDevice().createComputePipelineUnique(pipeline_cache, compute_pipeline_ci);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(forensic_event, "create_compute_pipeline", vk::to_string(pipeline_result));
+#endif
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
                vk::to_string(pipeline_result));
     pipeline = std::move(pipe);

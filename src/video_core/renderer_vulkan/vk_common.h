@@ -3,6 +3,12 @@
 
 #pragma once
 
+#include <atomic>
+#include <string_view>
+
+#include "common/logging/log.h"
+#include "common/types.h"
+
 // Include vulkan-hpp header
 #define VK_ENABLE_BETA_EXTENSIONS
 #define VK_NO_PROTOTYPES
@@ -41,4 +47,22 @@
 #define setStencilOp setStencilOpEXT
 #define setStencilTestEnable setStencilTestEnableEXT
 #define setViewportWithCount setViewportWithCountEXT
+
+namespace Vulkan::Win7Forensics {
+
+inline std::atomic<u64> event_sequence{};
+
+inline u64 Begin(std::string_view operation, std::string_view detail = {}) {
+    const u64 event = event_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    LOG_INFO(Render_Vulkan, "Win7 Vulkan forensics BEGIN event={} operation={} detail={}", event,
+             operation, detail);
+    return event;
+}
+
+inline void End(const u64 event, std::string_view operation, std::string_view result = {}) {
+    LOG_INFO(Render_Vulkan, "Win7 Vulkan forensics END event={} operation={} result={}", event,
+             operation, result);
+}
+
+} // namespace Vulkan::Win7Forensics
 #endif

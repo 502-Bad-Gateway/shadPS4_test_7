@@ -362,6 +362,8 @@ void PipelineCache::InitializePipelineForensics() {
         "shadPS4 Windows 7 pipeline-forensics capture\n"
         "Each pipeline_<id>_<hash>.txt begins with status=started.\n"
         "A status=success line is appended only if vkCreateGraphicsPipelines returns success.\n"
+        "The normal emulator log also contains ordered Win7 Vulkan forensics BEGIN/END events\n"
+        "for compute pipelines, command recording, queue submission, and device idle waits.\n"
         "Validate every modules/*.spv file with: spirv-val --target-env vulkan1.2 <file>\n"
         "Vulkan API: {}.{}.{}\n",
         VK_VERSION_MAJOR(instance.ApiVersion()), VK_VERSION_MINOR(instance.ApiVersion()),

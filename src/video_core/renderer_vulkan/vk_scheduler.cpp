@@ -4,6 +4,7 @@
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/thread.h"
+#include <fmt/format.h>
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -61,8 +62,16 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         .height = render_state.height,
         .layers = render_state.num_layers,
     };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto framebuffer_event = Win7Forensics::Begin(
+        "create_legacy_framebuffer", fmt::format("attachments={}", attachment_views.size()));
+#endif
     auto [framebuffer_result, framebuffer] =
         instance.GetDevice().createFramebuffer(framebuffer_info);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(framebuffer_event, "create_legacy_framebuffer",
+                       vk::to_string(framebuffer_result));
+#endif
     ASSERT_MSG(framebuffer_result == vk::Result::eSuccess,
                "Failed to create concrete legacy framebuffer: {}",
                vk::to_string(framebuffer_result));
@@ -80,7 +89,13 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     const vk::SubpassBeginInfo subpass_begin_info{
         .contents = vk::SubpassContents::eInline,
     };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto begin_render_pass_event = Win7Forensics::Begin("cmd_begin_render_pass2");
+#endif
     current_cmdbuf.beginRenderPass2(begin_info, subpass_begin_info);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(begin_render_pass_event, "cmd_begin_render_pass2", "recorded");
+#endif
 
     boost::container::static_vector<vk::ClearAttachment, 9> clear_attachments;
     for (u32 index = 0; index < render_state.num_color_attachments; ++index) {
@@ -113,7 +128,14 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
             .baseArrayLayer = 0,
             .layerCount = render_state.num_layers,
         };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        const auto clear_event = Win7Forensics::Begin(
+            "cmd_clear_attachments", fmt::format("attachments={}", clear_attachments.size()));
+#endif
         current_cmdbuf.clearAttachments(clear_attachments, clear_rect);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        Win7Forensics::End(clear_event, "cmd_clear_attachments", "recorded");
+#endif
     }
 #else
     std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
@@ -171,7 +193,9 @@ void Scheduler::EndRendering() {
     is_rendering = false;
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     const vk::SubpassEndInfo subpass_end_info{};
+    const auto end_render_pass_event = Win7Forensics::Begin("cmd_end_render_pass2");
     current_cmdbuf.endRenderPass2(subpass_end_info);
+    Win7Forensics::End(end_render_pass_event, "cmd_end_render_pass2", "recorded");
     const vk::Framebuffer framebuffer = legacy_framebuffer;
     legacy_framebuffer = nullptr;
     const vk::Device device = instance.GetDevice();
@@ -251,7 +275,13 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
 #endif
 
     EndRendering();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto end_command_buffer_event = Win7Forensics::Begin("end_command_buffer");
+#endif
     Check(current_cmdbuf.end());
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(end_command_buffer_event, "end_command_buffer", "returned");
+#endif
 
     const vk::Semaphore timeline = master_semaphore.Handle();
     info.AddSignal(timeline, signal_value);
@@ -280,8 +310,22 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     };
 
     ImGui::Core::TextureManager::Submit();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto submit_event = Win7Forensics::Begin("queue_submit");
+#endif
     auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7Forensics::End(submit_event, "queue_submit", vk::to_string(submit_result));
+#endif
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+    // Force deferred NVIDIA work to complete while the event stream still identifies the
+    // submission that triggered it. This is intentionally diagnostic-only.
+    const auto idle_event = Win7Forensics::Begin("device_wait_idle");
+    const auto idle_result = instance.GetDevice().waitIdle();
+    Win7Forensics::End(idle_event, "device_wait_idle", vk::to_string(idle_result));
+#endif
 
     master_semaphore.Refresh();
     AllocateWorkerCommandBuffers();

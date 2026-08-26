@@ -163,6 +163,7 @@ jobs:
           $strings = (& $stringsTool (Join-Path $output 'shadps4.exe') | Out-String)
           foreach ($required in @('Windows 7 compatibility-only settings active',
                                   'Windows 7 Vulkan 1.2 compatibility active',
+                                  'pipeline-forensics build forces vkValidation=true',
                                   'Win7 pipeline forensics enabled',
                                   'Win7 pipeline forensics START',
                                   'Win7 pipeline forensics SUCCESS')) {
@@ -180,6 +181,10 @@ jobs:
           @"
           shadPS4 Windows 7 pipeline-forensics diagnostic build
 
+          This diagnostic build forces vkValidation=true and vkValidationCore=true at runtime.
+          If the validation layer is unavailable on Windows 7, the normal log will report that
+          fact; the Vulkan event markers remain active independently.
+
           This build restores normal renderer behavior after the completed experimental axes.
           It records each legacy NVIDIA Vulkan 1.2 graphics-pipeline creation attempt under:
 
@@ -195,7 +200,8 @@ jobs:
           lineage=clean-upstream-7fb1a530
           upstream_commit=7fb1a530c15415097836521fec6f3483e27c81ae
           phase=windows7-vulkan-pipeline-diagnostics
-          single_axis=graphics-pipeline-forensics-capture
+          single_axis=validation-and-vulkan-call-boundary-forensics
+          validation_forced=true
           renderer_behavior_change=false
           previous_pipeline_optimization_experiment=reverted
           emulator_toolchain=clang-cl-msvc-ucrt
