@@ -1065,8 +1065,13 @@ static void CreatePipeline(vk::Device device, const vk::AllocationCallbacks* all
         .pDynamicStates = dynamic_states,
     };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const void* pipeline_pnext = nullptr;
+#else
+    const void* pipeline_pnext = &v.pipeline_rendering_create_info;
+#endif
     vk::GraphicsPipelineCreateInfo info{
-        .pNext = &v.pipeline_rendering_create_info,
+        .pNext = pipeline_pnext,
         .flags = bd->pipeline_create_flags,
         .stageCount = 2,
         .pStages = stage,
@@ -1155,7 +1160,8 @@ bool CreateDeviceObjects() {
             CheckVkResult(v.device.createPipelineLayout(layout_info, v.allocator));
     }
 
-    CreatePipeline(v.device, v.allocator, v.pipeline_cache, nullptr, &bd->pipeline, v.subpass);
+    CreatePipeline(v.device, v.allocator, v.pipeline_cache, v.render_pass, &bd->pipeline,
+                   v.subpass);
 
     if (bd->command_pool == VK_NULL_HANDLE) {
         vk::CommandPoolCreateInfo info{
@@ -1269,17 +1275,18 @@ void Shutdown() {
     IM_DELETE(bd);
 }
 
-void OnSurfaceFormatChange(vk::Format surface_format) {
+void OnSurfaceFormatChange(vk::Format surface_format, vk::RenderPass render_pass) {
     VkData* bd = GetBackendData();
     const InitInfo& v = bd->init_info;
     auto& pl_format = const_cast<vk::Format&>(
         bd->init_info.pipeline_rendering_create_info.pColorAttachmentFormats[0]);
     if (pl_format != surface_format) {
         pl_format = surface_format;
+        const_cast<vk::RenderPass&>(bd->init_info.render_pass) = render_pass;
         if (bd->pipeline) {
             v.device.destroyPipeline(bd->pipeline, v.allocator);
             bd->pipeline = VK_NULL_HANDLE;
-            CreatePipeline(v.device, v.allocator, v.pipeline_cache, nullptr, &bd->pipeline,
+            CreatePipeline(v.device, v.allocator, v.pipeline_cache, v.render_pass, &bd->pipeline,
                            v.subpass);
         }
     }

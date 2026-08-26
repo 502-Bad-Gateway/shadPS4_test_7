@@ -113,6 +113,15 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& w
     ::Core::Devtools::Layer::SetupSettings();
     Sdl::Init(window.GetSDLWindow());
 
+    vk::RenderPass render_pass{};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    ::Vulkan::LegacyRenderPassKey render_pass_key{};
+    render_pass_key.color_count = 1;
+    render_pass_key.color_formats[0] = surface_format;
+    render_pass_key.color_layouts[0] = vk::ImageLayout::eColorAttachmentOptimal;
+    render_pass = instance.GetLegacyRenderPass(render_pass_key);
+#endif
+
     const Vulkan::InitInfo vk_info{
         .instance = instance.GetInstance(),
         .physical_device = instance.GetPhysicalDevice(),
@@ -125,6 +134,7 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& w
             .colorAttachmentCount = 1,
             .pColorAttachmentFormats = &surface_format,
         },
+        .render_pass = render_pass,
         .allocator = allocator,
         .check_vk_result_fn = &CheckVkResult,
     };
@@ -147,8 +157,18 @@ void OnResize() {
     Sdl::OnResize();
 }
 
-void OnSurfaceFormatChange(vk::Format surface_format) {
-    Vulkan::OnSurfaceFormatChange(surface_format);
+void OnSurfaceFormatChange(const ::Vulkan::Instance& instance, vk::Format surface_format) {
+    vk::RenderPass render_pass{};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    ::Vulkan::LegacyRenderPassKey render_pass_key{};
+    render_pass_key.color_count = 1;
+    render_pass_key.color_formats[0] = surface_format;
+    render_pass_key.color_layouts[0] = vk::ImageLayout::eColorAttachmentOptimal;
+    render_pass = instance.GetLegacyRenderPass(render_pass_key);
+#else
+    (void)instance;
+#endif
+    Vulkan::OnSurfaceFormatChange(surface_format, render_pass);
 }
 
 void Shutdown(const vk::Device& device) {
@@ -247,8 +267,9 @@ ImGuiID NewFrame(bool is_reusing_frame) {
     return dockId;
 }
 
-void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
-            const vk::Extent2D& extent) {
+void Render(const ::Vulkan::Instance& instance, const vk::CommandBuffer& cmdbuf,
+            const vk::ImageView& image_view, const vk::Extent2D& extent,
+            const vk::Format surface_format) {
     ImGui::Render();
     ImDrawData* draw_data = GetDrawData();
     if (draw_data->CmdListsCount == 0) {
@@ -261,6 +282,33 @@ void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
         });
     }
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    ::Vulkan::LegacyRenderPassKey render_pass_key{};
+    render_pass_key.color_count = 1;
+    render_pass_key.color_formats[0] = surface_format;
+    render_pass_key.color_layouts[0] = vk::ImageLayout::eColorAttachmentOptimal;
+    const auto target =
+        instance.GetLegacyRenderTarget(render_pass_key, extent.width, extent.height, 1);
+    const vk::RenderPassAttachmentBeginInfo attachments_info{
+        .attachmentCount = 1,
+        .pAttachments = &image_view,
+    };
+    const vk::RenderPassBeginInfo begin_info{
+        .pNext = &attachments_info,
+        .renderPass = target.render_pass,
+        .framebuffer = target.framebuffer,
+        .renderArea = vk::Rect2D{.extent = extent},
+    };
+    cmdbuf.beginRenderPass(begin_info, vk::SubpassContents::eInline);
+    const vk::ClearAttachment clear_attachment{
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+    };
+    const vk::ClearRect clear_rect{
+        .rect = begin_info.renderArea,
+        .layerCount = 1,
+    };
+    cmdbuf.clearAttachments(clear_attachment, clear_rect);
+#else
     vk::RenderingAttachmentInfo color_attachments[1]{
         {
             .imageView = image_view,
@@ -278,8 +326,13 @@ void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
     render_info.colorAttachmentCount = 1;
     render_info.pColorAttachments = color_attachments;
     cmdbuf.beginRendering(render_info);
+#endif
     Vulkan::RenderDrawData(*draw_data, cmdbuf);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    cmdbuf.endRenderPass();
+#else
     cmdbuf.endRendering();
+#endif
     if (EmulatorSettings.IsVkHostMarkersEnabled()) {
         cmdbuf.endDebugUtilsLabelEXT();
     }

@@ -43,12 +43,25 @@ std::vector<std::string> GetSupportedExtensions(vk::PhysicalDevice physical) {
 }
 
 vk::FormatProperties3 GetFormatProperties(vk::PhysicalDevice physical, vk::Format format) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const vk::FormatProperties properties = physical.getFormatProperties(format);
+    const auto widen = [](vk::FormatFeatureFlags flags) {
+        return vk::FormatFeatureFlags2{
+            static_cast<VkFormatFeatureFlags2>(static_cast<VkFormatFeatureFlags>(flags))};
+    };
+    return vk::FormatProperties3{
+        .linearTilingFeatures = widen(properties.linearTilingFeatures),
+        .optimalTilingFeatures = widen(properties.optimalTilingFeatures),
+        .bufferFeatures = widen(properties.bufferFeatures),
+    };
+#else
     vk::FormatProperties3 properties3{};
     vk::FormatProperties2 properties2 = {
         .pNext = &properties3,
     };
     physical.getFormatProperties2(format, &properties2);
     return properties3;
+#endif
 }
 
 std::unordered_map<vk::Format, vk::FormatProperties3> GetFormatProperties(
@@ -174,6 +187,145 @@ Instance::~Instance() {
     vmaDestroyAllocator(allocator);
 }
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+vk::RenderPass Instance::GetLegacyRenderPassLocked(const LegacyRenderPassKey& key) const {
+    if (const auto render_pass = legacy_render_passes.find(key);
+        render_pass != legacy_render_passes.end()) {
+        return *render_pass->second;
+    }
+
+    boost::container::static_vector<vk::AttachmentDescription, 9> attachments;
+    std::array<vk::AttachmentReference, 8> color_references{};
+    for (u32 index = 0; index < color_references.size(); ++index) {
+        color_references[index] = {
+            .attachment = VK_ATTACHMENT_UNUSED,
+            .layout = key.color_layouts[index],
+        };
+    }
+
+    for (u32 index = 0; index < key.color_count; ++index) {
+        if (key.color_formats[index] == vk::Format::eUndefined) {
+            continue;
+        }
+        color_references[index].attachment = static_cast<u32>(attachments.size());
+        attachments.emplace_back(vk::AttachmentDescription{
+            .format = key.color_formats[index],
+            .samples = key.color_samples[index],
+            .loadOp = vk::AttachmentLoadOp::eLoad,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+            .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+            .initialLayout = key.color_layouts[index],
+            .finalLayout = key.color_layouts[index],
+        });
+    }
+
+    vk::AttachmentReference depth_reference{
+        .attachment = VK_ATTACHMENT_UNUSED,
+        .layout = key.depth_layout,
+    };
+    if ((key.has_depth || key.has_stencil) && key.depth_format != vk::Format::eUndefined) {
+        depth_reference.attachment = static_cast<u32>(attachments.size());
+        attachments.emplace_back(vk::AttachmentDescription{
+            .format = key.depth_format,
+            .samples = key.depth_samples,
+            .loadOp = vk::AttachmentLoadOp::eLoad,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eLoad,
+            .stencilStoreOp = vk::AttachmentStoreOp::eStore,
+            .initialLayout = key.depth_layout,
+            .finalLayout = key.depth_layout,
+        });
+    }
+
+    const vk::SubpassDescription subpass{
+        .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+        .colorAttachmentCount = key.color_count,
+        .pColorAttachments = color_references.data(),
+        .pDepthStencilAttachment =
+            depth_reference.attachment != VK_ATTACHMENT_UNUSED ? &depth_reference : nullptr,
+    };
+    const vk::RenderPassCreateInfo create_info{
+        .attachmentCount = static_cast<u32>(attachments.size()),
+        .pAttachments = attachments.data(),
+        .subpassCount = 1,
+        .pSubpasses = &subpass,
+    };
+    auto [result, render_pass] = device->createRenderPassUnique(create_info);
+    ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create legacy render pass: {}",
+               vk::to_string(result));
+    const auto handle = *render_pass;
+    legacy_render_passes.emplace(key, std::move(render_pass));
+    return handle;
+}
+
+vk::RenderPass Instance::GetLegacyRenderPass(const LegacyRenderPassKey& key) const {
+    std::scoped_lock lock{legacy_render_cache_mutex};
+    return GetLegacyRenderPassLocked(key);
+}
+
+LegacyRenderTarget Instance::GetLegacyRenderTarget(const LegacyRenderPassKey& key, u32 width,
+                                                   u32 height, u32 layers) const {
+    std::scoped_lock lock{legacy_render_cache_mutex};
+    const vk::RenderPass render_pass = GetLegacyRenderPassLocked(key);
+    const LegacyFramebufferKey framebuffer_key{render_pass, width, height, layers};
+    if (const auto framebuffer = legacy_framebuffers.find(framebuffer_key);
+        framebuffer != legacy_framebuffers.end()) {
+        return {render_pass, *framebuffer->second};
+    }
+
+    std::array<vk::Format, 9> view_formats{};
+    boost::container::static_vector<vk::FramebufferAttachmentImageInfo, 9> attachment_infos;
+    for (u32 index = 0; index < key.color_count; ++index) {
+        if (key.color_formats[index] == vk::Format::eUndefined) {
+            continue;
+        }
+        const u32 attachment = static_cast<u32>(attachment_infos.size());
+        view_formats[attachment] = key.color_formats[index];
+        attachment_infos.emplace_back(vk::FramebufferAttachmentImageInfo{
+            .usage = vk::ImageUsageFlagBits::eColorAttachment,
+            .width = width,
+            .height = height,
+            .layerCount = layers,
+            .viewFormatCount = 1,
+            .pViewFormats = &view_formats[attachment],
+        });
+    }
+    if ((key.has_depth || key.has_stencil) && key.depth_format != vk::Format::eUndefined) {
+        const u32 attachment = static_cast<u32>(attachment_infos.size());
+        view_formats[attachment] = key.depth_format;
+        attachment_infos.emplace_back(vk::FramebufferAttachmentImageInfo{
+            .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment,
+            .width = width,
+            .height = height,
+            .layerCount = layers,
+            .viewFormatCount = 1,
+            .pViewFormats = &view_formats[attachment],
+        });
+    }
+
+    const vk::FramebufferAttachmentsCreateInfo attachments_info{
+        .attachmentImageInfoCount = static_cast<u32>(attachment_infos.size()),
+        .pAttachmentImageInfos = attachment_infos.data(),
+    };
+    const vk::FramebufferCreateInfo create_info{
+        .pNext = &attachments_info,
+        .flags = vk::FramebufferCreateFlagBits::eImageless,
+        .renderPass = render_pass,
+        .attachmentCount = static_cast<u32>(attachment_infos.size()),
+        .width = width,
+        .height = height,
+        .layers = layers,
+    };
+    auto [result, framebuffer] = device->createFramebufferUnique(create_info);
+    ASSERT_MSG(result == vk::Result::eSuccess, "Failed to create legacy framebuffer: {}",
+               vk::to_string(result));
+    const auto handle = *framebuffer;
+    legacy_framebuffers.emplace(framebuffer_key, std::move(framebuffer));
+    return {render_pass, handle};
+}
+#endif
+
 std::string Instance::GetDriverVersionName() {
     // Extracted from
     // https://github.com/SaschaWillems/vulkan.gpuinfo.org/blob/5dddea46ea1120b0df14eef8f15ff8e318e35462/functions.php#L308-L314
@@ -194,6 +346,19 @@ std::string Instance::GetDriverVersionName() {
 }
 
 bool Instance::CreateDevice() {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const vk::StructureChain feature_chain =
+        physical_device
+            .getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features,
+                          vk::PhysicalDeviceVulkan12Features,
+                          vk::PhysicalDeviceSynchronization2FeaturesKHR,
+                          vk::PhysicalDeviceRobustness2FeaturesEXT,
+                          vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
+                          vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT,
+                          vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT,
+                          vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
+                          vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT>();
+#else
     const vk::StructureChain feature_chain =
         physical_device
             .getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features,
@@ -204,15 +369,24 @@ bool Instance::CreateDevice() {
                           vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT,
                           vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
                           vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT>();
+#endif
     features = feature_chain.get().features;
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const vk::StructureChain properties_chain = physical_device.getProperties2<
+        vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties,
+        vk::PhysicalDeviceVulkan12Properties, vk::PhysicalDevicePushDescriptorPropertiesKHR>();
+#else
     const vk::StructureChain properties_chain = physical_device.getProperties2<
         vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties,
         vk::PhysicalDeviceVulkan12Properties, vk::PhysicalDeviceVulkan13Properties,
         vk::PhysicalDevicePushDescriptorPropertiesKHR>();
+#endif
     vk11_props = properties_chain.get<vk::PhysicalDeviceVulkan11Properties>();
     vk12_props = properties_chain.get<vk::PhysicalDeviceVulkan12Properties>();
+#ifndef SHADPS4_WINDOWS_7_COMPAT
     vk13_props = properties_chain.get<vk::PhysicalDeviceVulkan13Properties>();
+#endif
     push_descriptor_props = properties_chain.get<vk::PhysicalDevicePushDescriptorPropertiesKHR>();
     LOG_INFO(Render_Vulkan, "Physical device subgroup size {}", vk11_props.subgroupSize);
 
@@ -255,6 +429,16 @@ bool Instance::CreateDevice() {
                "Required Vulkan feature unavailable: robustImageAccess2");
     ASSERT_MSG(robustness2_features.nullDescriptor,
                "Required Vulkan feature unavailable: nullDescriptor");
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    ASSERT_MSG(add_extension(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME),
+               "Required Vulkan extension unavailable: {}",
+               VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    const auto synchronization2_features =
+        feature_chain.get<vk::PhysicalDeviceSynchronization2FeaturesKHR>();
+    ASSERT_MSG(synchronization2_features.synchronization2,
+               "Required Vulkan feature unavailable: synchronization2");
+#endif
 
     // Optional
     maintenance_8 = add_extension(VK_KHR_MAINTENANCE_8_EXTENSION_NAME);
@@ -368,7 +552,12 @@ bool Instance::CreateDevice() {
 
     const auto vk11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
     vk12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    ASSERT_MSG(vk12_features.imagelessFramebuffer,
+               "Required Vulkan 1.2 feature unavailable: imagelessFramebuffer");
+#else
     vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
+#endif
     vk::StructureChain device_chain = {
         vk::DeviceCreateInfo{
             .queueCreateInfoCount = 1u,
@@ -418,6 +607,9 @@ bool Instance::CreateDevice() {
             .shaderFloat16 = vk12_features.shaderFloat16,
             .shaderInt8 = vk12_features.shaderInt8,
             .scalarBlockLayout = vk12_features.scalarBlockLayout,
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+            .imagelessFramebuffer = vk12_features.imagelessFramebuffer,
+#endif
             .uniformBufferStandardLayout = vk12_features.uniformBufferStandardLayout,
             .separateDepthStencilLayouts = vk12_features.separateDepthStencilLayouts,
             .hostQueryReset = vk12_features.hostQueryReset,
@@ -433,6 +625,11 @@ bool Instance::CreateDevice() {
             .dynamicRendering = vk13_features.dynamicRendering,
             .maintenance4 = vk13_features.maintenance4,
         },
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        vk::PhysicalDeviceSynchronization2FeaturesKHR{
+            .synchronization2 = true,
+        },
+#endif
         // Extensions
         vk::PhysicalDeviceCustomBorderColorFeaturesEXT{
             .customBorderColors = true,
@@ -502,6 +699,10 @@ bool Instance::CreateDevice() {
             .minLod = true,
         },
     };
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    device_chain.unlink<vk::PhysicalDeviceVulkan13Features>();
+#endif
 
     if (!custom_border_color) {
         device_chain.unlink<vk::PhysicalDeviceCustomBorderColorFeaturesEXT>();
@@ -722,6 +923,10 @@ void Instance::CollectImageFormatInfo() {
 }
 
 void Instance::CollectToolingInfo() const {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    // Diagnostic-only and unreliable on the tested legacy NVIDIA Windows 7 stack.
+    return;
+#else
     if (driver_id == vk::DriverId::eAmdProprietary ||
         driver_id == vk::DriverId::eIntelProprietaryWindows) {
         // AMD: Causes issues with Reshade.
@@ -738,6 +943,7 @@ void Instance::CollectToolingInfo() const {
         const std::string_view name = tool.name;
         LOG_INFO(Render_Vulkan, "Attached debugging tool: {}", name);
     }
+#endif
 }
 
 u64 Instance::GetDeviceMemoryUsage() const {

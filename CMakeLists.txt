@@ -1372,8 +1372,8 @@ if (WIN32)
     endif()
 
     if (ENABLE_WINDOWS_7_COMPAT)
-        # Windows 7 SP1 portability path. Vulkan remains intentionally unmodified in the
-        # compatibility-only validation build.
+        # Windows 7 SP1 portability path. Vulkan compatibility is limited to the host presenter
+        # used by the null-GPU validation build; guest GPU rendering remains unchanged.
         add_compile_definitions(NTDDI_VERSION=0x06010000 _WIN32_WINNT=0x0601 WINVER=0x0601
                                 SHADPS4_WINDOWS_7_COMPAT)
         if (ENABLE_WINDOWS_7_COMPAT_ONLY)

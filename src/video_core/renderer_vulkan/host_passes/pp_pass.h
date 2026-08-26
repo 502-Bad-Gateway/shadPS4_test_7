@@ -8,7 +8,8 @@
 
 namespace Vulkan {
 class Frame;
-}
+class Instance;
+} // namespace Vulkan
 
 namespace Vulkan::HostPasses {
 
@@ -19,7 +20,7 @@ public:
         u32 hdr = 0;
     };
 
-    void Create(vk::Device device, vk::Format surface_format);
+    void Create(const Instance& instance, vk::Format surface_format);
 
     void Render(vk::CommandBuffer cmdbuf, vk::ImageView input, vk::Extent2D input_size,
                 Frame& output, Settings settings);
@@ -29,6 +30,10 @@ private:
     vk::UniquePipelineLayout pipeline_layout{};
     vk::UniqueDescriptorSetLayout desc_set_layout{};
     vk::UniqueSampler sampler{};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const Instance* instance{};
+    vk::Format surface_format{};
+#endif
 };
 
 } // namespace Vulkan::HostPasses

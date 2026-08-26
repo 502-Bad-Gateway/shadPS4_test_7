@@ -16,13 +16,13 @@ struct Frame;
 
 namespace ImGui::Core {
 
-void Initialize(const Vulkan::Instance& instance, const Frontend::WindowSDL& window,
+void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& window,
                 u32 image_count, vk::Format surface_format,
                 const vk::AllocationCallbacks* allocator = nullptr);
 
 void OnResize();
 
-void OnSurfaceFormatChange(vk::Format surface_format);
+void OnSurfaceFormatChange(const ::Vulkan::Instance& instance, vk::Format surface_format);
 
 void Shutdown(const vk::Device& device);
 
@@ -34,8 +34,8 @@ bool IsGamepadInputCaptured();
 
 ImGuiID NewFrame(bool is_reusing_frame = false);
 
-void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
-            const vk::Extent2D& extent);
+void Render(const ::Vulkan::Instance& instance, const vk::CommandBuffer& cmdbuf,
+            const vk::ImageView& image_view, const vk::Extent2D& extent, vk::Format surface_format);
 
 bool MustKeepDrawing(); // Force the emulator redraw
 

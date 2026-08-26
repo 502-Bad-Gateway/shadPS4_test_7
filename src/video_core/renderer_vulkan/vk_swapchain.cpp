@@ -98,8 +98,8 @@ void Swapchain::SetHDR(bool hdr) {
 
     needs_hdr = hdr;
     Recreate(width, height);
-    ImGui::Core::OnSurfaceFormatChange(needs_hdr ? SURFACE_FORMAT_HDR.format
-                                                 : surface_format.format);
+    ImGui::Core::OnSurfaceFormatChange(instance, needs_hdr ? SURFACE_FORMAT_HDR.format
+                                                           : surface_format.format);
 }
 
 bool Swapchain::AcquireNextImage() {

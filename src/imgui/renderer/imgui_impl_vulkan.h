@@ -29,6 +29,7 @@ struct InitInfo {
     vk::PipelineCache pipeline_cache;
     uint32_t subpass;
     vk::PipelineRenderingCreateInfoKHR pipeline_rendering_create_info;
+    vk::RenderPass render_pass;
 
     // (Optional) Allocation, Logging
     const vk::AllocationCallbacks* allocator{};
@@ -67,6 +68,6 @@ void RenderDrawData(ImDrawData& draw_data, vk::CommandBuffer command_buffer,
                     vk::Pipeline pipeline = VK_NULL_HANDLE);
 
 void SetBlendEnabled(bool enabled);
-void OnSurfaceFormatChange(vk::Format surface_format);
+void OnSurfaceFormatChange(vk::Format surface_format, vk::RenderPass render_pass = {});
 
 } // namespace ImGui::Vulkan

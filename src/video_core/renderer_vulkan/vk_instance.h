@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <map>
+#include <mutex>
 #include <span>
 #include <unordered_map>
 
@@ -18,6 +20,32 @@ class WindowSDL;
 VK_DEFINE_HANDLE(VmaAllocator)
 
 namespace Vulkan {
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+struct LegacyRenderPassKey {
+    std::array<vk::Format, 8> color_formats{};
+    std::array<vk::SampleCountFlagBits, 8> color_samples{};
+    std::array<vk::ImageLayout, 8> color_layouts{};
+    vk::Format depth_format{};
+    vk::SampleCountFlagBits depth_samples{vk::SampleCountFlagBits::e1};
+    vk::ImageLayout depth_layout{vk::ImageLayout::eGeneral};
+    u32 color_count{};
+    bool has_depth{};
+    bool has_stencil{};
+
+    LegacyRenderPassKey() {
+        color_samples.fill(vk::SampleCountFlagBits::e1);
+        color_layouts.fill(vk::ImageLayout::eGeneral);
+    }
+
+    auto operator<=>(const LegacyRenderPassKey&) const noexcept = default;
+};
+
+struct LegacyRenderTarget {
+    vk::RenderPass render_pass;
+    vk::Framebuffer framebuffer;
+};
+#endif
 
 class Instance {
 public:
@@ -230,7 +258,11 @@ public:
 
     /// Returns true if the subgroup size can be set to match guest subgroup size
     bool IsSubgroupSize64Supported() const {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        return false;
+#else
         return vk13_features.subgroupSizeControl && vk13_props.maxSubgroupSize >= 64;
+#endif
     }
 
     /// Returns true when VK_KHR_workgroup_memory_explicit_layout is supported.
@@ -445,6 +477,15 @@ public:
     /// Determines if a format is supported for a set of feature flags.
     [[nodiscard]] bool IsFormatSupported(vk::Format format, vk::FormatFeatureFlags2 flags) const;
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    /// Gets a traditional render pass compatible with the supplied host attachments.
+    [[nodiscard]] vk::RenderPass GetLegacyRenderPass(const LegacyRenderPassKey& key) const;
+
+    /// Gets an imageless framebuffer and its compatible traditional render pass.
+    [[nodiscard]] LegacyRenderTarget GetLegacyRenderTarget(const LegacyRenderPassKey& key,
+                                                           u32 width, u32 height, u32 layers) const;
+#endif
+
 private:
     /// Creates the logical device opportunistically enabling extensions
     bool CreateDevice();
@@ -462,6 +503,19 @@ private:
     [[nodiscard]] vk::FormatFeatureFlags2 GetFormatFeatureFlags(vk::Format format) const;
 
 private:
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    struct LegacyFramebufferKey {
+        vk::RenderPass render_pass;
+        u32 width;
+        u32 height;
+        u32 layers;
+
+        auto operator<=>(const LegacyFramebufferKey&) const noexcept = default;
+    };
+
+    [[nodiscard]] vk::RenderPass GetLegacyRenderPassLocked(const LegacyRenderPassKey& key) const;
+#endif
+
     vk::UniqueInstance instance;
     vk::PhysicalDevice physical_device;
     vk::UniqueDevice device;
@@ -518,6 +572,11 @@ private:
     bool supports_block_texel_view{};
     u64 total_memory_budget{};
     std::vector<size_t> valid_heaps;
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    mutable std::mutex legacy_render_cache_mutex;
+    mutable std::map<LegacyRenderPassKey, vk::UniqueRenderPass> legacy_render_passes;
+    mutable std::map<LegacyFramebufferKey, vk::UniqueFramebuffer> legacy_framebuffers;
+#endif
 };
 
 } // namespace Vulkan

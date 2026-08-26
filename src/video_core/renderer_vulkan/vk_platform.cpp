@@ -285,6 +285,12 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
                VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
                VK_VERSION_MAJOR(available_version), VK_VERSION_MINOR(available_version));
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    LOG_INFO(Render_Vulkan,
+             "Windows 7 Vulkan 1.2 presenter compatibility active; guest rendering remains "
+             "disabled by null GPU");
+#endif
+
     const auto layers = GetInstanceLayers(enable_validation, enable_crash_diagnostic);
     const auto extensions = GetLayerExtensions(GetInstanceExtensions(window_type, true), layers);
 
@@ -293,7 +299,11 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
         .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
         .pEngineName = "shadPS4 Vulkan",
         .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .apiVersion = TargetVulkanApiVersion,
+#else
         .apiVersion = available_version,
+#endif
     };
 
     const std::string extensions_string = fmt::format("{}", fmt::join(extensions, ", "));

@@ -21,3 +21,9 @@
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
+
+// Vulkan 1.2 exposes synchronization2 through its KHR extension entry points. Keep the shared
+// presenter call sites while selecting those entry points only for the Windows 7 build.
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+#define pipelineBarrier2 pipelineBarrier2KHR
+#endif

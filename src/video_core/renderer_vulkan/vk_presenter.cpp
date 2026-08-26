@@ -496,7 +496,7 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
         static_cast<float>(EmulatorSettings.GetRcasAttenuation() / 1000.f);
 
     fsr_pass.Create(device, instance.GetAllocator(), num_images);
-    pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
+    pp_pass.Create(instance, swapchain.GetSurfaceFormat().format);
 
     ImGui::Layer::AddLayer(Common::Singleton<Core::Devtools::Layer>::Instance());
     ImGui::Friends::Register();
@@ -773,6 +773,18 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
         .levelCount = 1,
         .layerCount = 1,
     };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto pre_barrier = vk::ImageMemoryBarrier2{
+        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .srcAccessMask = vk::AccessFlagBits2::eNone,
+        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eTransferDstOptimal,
+        .image = frame->image,
+        .subresourceRange = simple_subresource,
+    };
+#else
     const auto pre_barrier = vk::ImageMemoryBarrier2{
         .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
         .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentRead,
@@ -783,7 +795,20 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
         .image = frame->image,
         .subresourceRange = simple_subresource,
     };
+#endif
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto post_barrier = vk::ImageMemoryBarrier2{
+        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader,
+        .dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+        .newLayout = vk::ImageLayout::eGeneral,
+        .image = frame->image,
+        .subresourceRange = simple_subresource,
+    };
+#else
     const auto post_barrier = vk::ImageMemoryBarrier2{
         .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
         .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
@@ -794,7 +819,9 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
         .image = frame->image,
         .subresourceRange = simple_subresource,
     };
+#endif
 
+#ifndef SHADPS4_WINDOWS_7_COMPAT
     const vk::RenderingAttachmentInfo attachment = {
         .imageView = frame->image_view,
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
@@ -810,14 +837,21 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
         .colorAttachmentCount = 1u,
         .pColorAttachments = &attachment,
     };
+#endif
 
     cmdbuf.pipelineBarrier2(vk::DependencyInfo{
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &pre_barrier,
     });
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    constexpr vk::ClearColorValue clear_color{};
+    cmdbuf.clearColorImage(frame->image, vk::ImageLayout::eTransferDstOptimal, clear_color,
+                           simple_subresource);
+#else
     cmdbuf.beginRendering(rendering_info);
     cmdbuf.endRendering();
+#endif
 
     cmdbuf.pipelineBarrier2(vk::DependencyInfo{
         .imageMemoryBarrierCount = 1,
@@ -983,7 +1017,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame) {
             ImGui::PopStyleVar(3);
             ImGui::PopStyleColor();
         }
-        ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
+        ImGui::Core::Render(instance, cmdbuf, swapchain_image_view, swapchain.GetExtent(),
+                            swapchain.GetHDR() ? vk::Format::eA2B10G10R10UnormPack32
+                                               : swapchain.GetSurfaceFormat().format);
 
         if (capture_with_overlays_count > 0) {
             pending_screenshots.emplace_back(

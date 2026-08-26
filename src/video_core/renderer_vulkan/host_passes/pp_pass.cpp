@@ -7,6 +7,7 @@
 #include "core/emulator_settings.h"
 #include "video_core/host_shaders/fs_tri_vert.h"
 #include "video_core/host_shaders/post_process_frag.h"
+#include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -15,7 +16,12 @@
 
 namespace Vulkan::HostPasses {
 
-void PostProcessingPass::Create(vk::Device device, const vk::Format surface_format) {
+void PostProcessingPass::Create(const Instance& instance_, const vk::Format surface_format_) {
+    const vk::Device device = instance_.GetDevice();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    instance = &instance_;
+    surface_format = surface_format_;
+#endif
     static const std::array pp_shaders{
         HostShaders::FS_TRI_VERT,
         HostShaders::POST_PROCESS_FRAG,
@@ -76,13 +82,21 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
     pipeline_layout =
         Check<"create pp pipeline layout">(device.createPipelineLayoutUnique(layout_info));
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    LegacyRenderPassKey render_pass_key{};
+    render_pass_key.color_count = 1;
+    render_pass_key.color_formats[0] = surface_format_;
+    render_pass_key.color_layouts[0] = vk::ImageLayout::eColorAttachmentOptimal;
+    const vk::RenderPass legacy_render_pass = instance_.GetLegacyRenderPass(render_pass_key);
+#else
     const std::array pp_color_formats{
-        surface_format,
+        surface_format_,
     };
     const vk::PipelineRenderingCreateInfo pipeline_rendering_ci{
         .colorAttachmentCount = pp_color_formats.size(),
         .pColorAttachmentFormats = pp_color_formats.data(),
     };
+#endif
 
     const vk::PipelineVertexInputStateCreateInfo vertex_input_info{
         .vertexBindingDescriptionCount = 0u,
@@ -155,7 +169,11 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
     };
 
     const vk::GraphicsPipelineCreateInfo pipeline_info{
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .pNext = nullptr,
+#else
         .pNext = &pipeline_rendering_ci,
+#endif
         .stageCount = shaders_ci.size(),
         .pStages = shaders_ci.data(),
         .pVertexInputState = &vertex_input_info,
@@ -166,6 +184,9 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_info,
         .layout = *pipeline_layout,
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .renderPass = legacy_render_pass,
+#endif
     };
 
     pipeline = Check<"create post process pipeline">(device.createGraphicsPipelineUnique(
@@ -199,6 +220,7 @@ void PostProcessingPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
         .levelCount = 1,
         .layerCount = 1,
     };
+#ifndef SHADPS4_WINDOWS_7_COMPAT
     const std::array<vk::RenderingAttachmentInfo, 1> attachments{{
         {
             .imageView = frame.image_view,
@@ -218,6 +240,7 @@ void PostProcessingPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
         .colorAttachmentCount = attachments.size(),
         .pColorAttachments = attachments.data(),
     };
+#endif
 
     vk::DescriptorImageInfo image_info{
         .sampler = *sampler,
@@ -259,9 +282,42 @@ void PostProcessingPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
     cmdbuf.pushConstants(*pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(Settings),
                          &settings);
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    LegacyRenderPassKey render_pass_key{};
+    render_pass_key.color_count = 1;
+    render_pass_key.color_formats[0] = surface_format;
+    render_pass_key.color_layouts[0] = vk::ImageLayout::eColorAttachmentOptimal;
+    const auto target =
+        instance->GetLegacyRenderTarget(render_pass_key, frame.width, frame.height, 1);
+    const vk::ImageView output_view = frame.image_view;
+    const vk::RenderPassAttachmentBeginInfo attachments_info{
+        .attachmentCount = 1,
+        .pAttachments = &output_view,
+    };
+    const vk::RenderPassBeginInfo begin_info{
+        .pNext = &attachments_info,
+        .renderPass = target.render_pass,
+        .framebuffer = target.framebuffer,
+        .renderArea = vk::Rect2D{.extent = {frame.width, frame.height}},
+    };
+    cmdbuf.beginRenderPass(begin_info, vk::SubpassContents::eInline);
+    const vk::ClearAttachment clear_attachment{
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+    };
+    const vk::ClearRect clear_rect{
+        .rect = begin_info.renderArea,
+        .layerCount = 1,
+    };
+    cmdbuf.clearAttachments(clear_attachment, clear_rect);
+#else
     cmdbuf.beginRendering(rendering_info);
+#endif
     cmdbuf.draw(3, 1, 0, 0);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    cmdbuf.endRenderPass();
+#else
     cmdbuf.endRendering();
+#endif
 
     const auto post_barrier = vk::ImageMemoryBarrier2{
         .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
