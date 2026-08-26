@@ -5,6 +5,7 @@ on:
     branches: [win7-v1-dumb-gpu]
     paths:
       - .github/scripts/apply-win7-dumb-gpu-phase1.py
+      - .github/workflows/apply-win7-dumb-gpu-phase1.yml
   workflow_dispatch:
 
 permissions:
