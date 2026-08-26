@@ -1,4 +1,4 @@
-name: Build shadPS4 Win7 V1 compatibility-only
+name: Build shadPS4 Win7 V1 clang-cl control
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 compatibility-only target
+    name: Build Windows 7 x64 clang-cl control target
     runs-on: windows-2022
     timeout-minutes: 120
 
@@ -30,7 +30,7 @@ jobs:
       - name: Setup CMake
         uses: lukka/get-cmake@latest
 
-      - name: Fetch llvm-mingw
+      - name: Fetch llvm-mingw launcher and audit tools
         shell: pwsh
         run: |
           $version = '20260616'
@@ -44,8 +44,8 @@ jobs:
           Expand-Archive -Path $archive -DestinationPath $parent
           $root = Join-Path $parent "llvm-mingw-$version-msvcrt-x86_64"
           $bin = Join-Path $root 'bin'
-          foreach ($tool in @('x86_64-w64-mingw32-clang.exe',
-                              'x86_64-w64-mingw32-clang++.exe',
+          foreach ($tool in @('x86_64-w64-mingw32-clang++.exe',
+                              'x86_64-w64-mingw32-windres.exe',
                               'llvm-readobj.exe',
                               'llvm-strings.exe')) {
               if (!(Test-Path (Join-Path $bin $tool))) {
@@ -53,15 +53,11 @@ jobs:
               }
           }
           "LLVM_MINGW_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Apply the llvm-mingw FDK workaround
-        shell: pwsh
-        run: |
-          git -C externals/aacdec/fdk-aac apply --check ../../../ci/fdk-aac-llvm-mingw.patch
-          if ($LASTEXITCODE -ne 0) { throw 'FDK patch check failed' }
-          git -C externals/aacdec/fdk-aac apply ../../../ci/fdk-aac-llvm-mingw.patch
-          if ($LASTEXITCODE -ne 0) { throw 'FDK patch application failed' }
+      - name: Setup Visual Studio build environment
+        uses: egor-tensin/vs-shell@v2
+        with:
+          arch: x64
 
       - name: Prepare launcher dependency
         shell: pwsh
@@ -72,27 +68,29 @@ jobs:
             -Uri 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' `
             -OutFile (Join-Path $jsonDir 'json.hpp')
 
-      - name: Configure Windows 7 compatibility-only build
+      - name: Configure Windows 7 clang-cl control build
         shell: pwsh
         run: |
-          $bin = Join-Path $env:LLVM_MINGW_ROOT 'bin'
-          $cc = Join-Path $bin 'x86_64-w64-mingw32-clang.exe'
-          $cxx = Join-Path $bin 'x86_64-w64-mingw32-clang++.exe'
-          $rc = Join-Path $bin 'x86_64-w64-mingw32-windres.exe'
-          if (!(Test-Path $rc)) { $rc = Join-Path $bin 'llvm-windres.exe' }
-          if (!(Test-Path $rc)) { throw 'llvm-mingw resource compiler not found' }
-          $ccCMake = $cc -replace '\\', '/'
-          $cxxCMake = $cxx -replace '\\', '/'
-          $rcCMake = $rc -replace '\\', '/'
           $env:SOURCE_DATE_EPOCH = '0'
           $env:TZ = 'UTC'
+          $clangCl = Get-Command clang-cl.exe -ErrorAction Stop
+          $link = Get-Command link.exe -ErrorAction Stop
+          $rc = Get-Command rc.exe -ErrorAction Stop
+          $clangVersion = (& $clangCl.Source --version | Out-String)
+          if ($clangVersion -notmatch '(?m)^Target:\s+x86_64-pc-windows-msvc\s*$') {
+              throw "Unexpected clang-cl target; MSVC/UCRT control axis is not active:`n$clangVersion"
+          }
+          @(
+              "clang-cl=$($clangCl.Source)"
+              "link=$($link.Source)"
+              "rc=$($rc.Source)"
+              $clangVersion.TrimEnd()
+          ) | Out-File -Encoding utf8 (Join-Path $env:RUNNER_TEMP 'CLANG-CL-IDENTITY.txt')
+          # The unchanged top-level CMakeLists.txt applies -march=x86-64-v3 to x86_64 builds.
           cmake -S . -B build-win7-v1 -G Ninja `
-            "-DCMAKE_C_COMPILER=$ccCMake" `
-            "-DCMAKE_CXX_COMPILER=$cxxCMake" `
-            "-DCMAKE_RC_COMPILER=$rcCMake" `
+            '-DCMAKE_C_COMPILER=clang-cl' `
+            '-DCMAKE_CXX_COMPILER=clang-cl' `
             '-DCMAKE_BUILD_TYPE=Release' `
-            '-DCMAKE_C_FLAGS=-march=x86-64-v3' `
-            '-DCMAKE_CXX_FLAGS=-march=x86-64-v3' `
             '-DENABLE_WINDOWS_7_COMPAT=ON' `
             '-DENABLE_WINDOWS_7_COMPAT_ONLY=ON' `
             '-DENABLE_DISCORD_RPC=OFF' `
@@ -145,14 +143,8 @@ jobs:
           Copy-Item tools/win7-launcher/LICENSE-GPL-2.0-or-later.txt `
               (Join-Path $output 'LICENSE-win7-launcher-GPL-2.0-or-later.txt')
 
-          foreach ($dllName in @('libc++.dll', 'libunwind.dll', 'libwinpthread-1.dll')) {
-              $candidates = @(Get-ChildItem -Path $env:LLVM_MINGW_ROOT -Recurse -File -Filter $dllName)
-              if ($candidates.Count -eq 0) { throw "Runtime DLL not found: $dllName" }
-              $preferred = $candidates | Where-Object { $_.FullName -match 'x86_64-w64-mingw32' } |
-                  Select-Object -First 1
-              if ($null -eq $preferred) { $preferred = $candidates | Select-Object -First 1 }
-              Copy-Item $preferred.FullName (Join-Path $output $dllName)
-          }
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'CLANG-CL-IDENTITY.txt') `
+              (Join-Path $output 'CLANG-CL-IDENTITY.txt')
 
           $readObj = Join-Path $env:LLVM_MINGW_ROOT 'bin/llvm-readobj.exe'
           $auditPath = Join-Path $output 'PE-AUDIT.txt'
@@ -183,9 +175,10 @@ jobs:
           lineage=clean-upstream-7fb1a530
           upstream_commit=7fb1a530c15415097836521fec6f3483e27c81ae
           phase=windows7-compatibility-only-v1
-          llvm_mingw=20260616-msvcrt-x86_64
-          llvm=22.1.8
-          target=x86_64-w64-windows-gnu
+          single_axis=emulator-toolchain-runtime
+          emulator_toolchain=clang-cl-msvc-ucrt
+          emulator_target=x86_64-pc-windows-msvc
+          launcher_toolchain=llvm-mingw-20260616-msvcrt-x86_64-static
           cpu=x86-64-v3
           null_gpu_default=true
           show_splash_default=true
@@ -201,10 +194,10 @@ jobs:
               } | Sort-Object)
           $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
 
-      - name: Upload Windows 7 V1 artifact
+      - name: Upload Windows 7 V1 clang-cl control artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shadps4-win7-v1-compat-only-${{ github.sha }}
+          name: shadps4-win7-v1-clangcl-control-${{ github.sha }}
           path: artifact/
           if-no-files-found: error
           retention-days: 30
