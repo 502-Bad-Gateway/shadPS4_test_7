@@ -547,7 +547,7 @@ GraphicsPipeline::GraphicsPipeline(
             "mixed_any_samples={}\nmixed_depth_samples={}\n",
             vk::to_string(topology), static_cast<u32>(key.prim_type),
             tessellation_state.patchControlPoints, raster_chain.get().depthClampEnable,
-            key.depth_clip_enable, vk::to_string(raster_chain.get().polygonMode),
+            static_cast<bool>(key.depth_clip_enable), vk::to_string(raster_chain.get().polygonMode),
             static_cast<u32>(key.provoking_vtx_last), instance.IsVertexInputDynamicState(),
             instance.IsExtendedDynamicState3Supported(),
             instance.IsDynamicColorWriteMaskSupported(), instance.IsMixedAnySamplesSupported(),

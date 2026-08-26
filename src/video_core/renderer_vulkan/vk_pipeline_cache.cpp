@@ -376,6 +376,7 @@ void PipelineCache::InitializePipelineForensics() {
 void PipelineCache::RegisterPipelineForensicsShader(vk::ShaderModule module,
                                                      std::span<const u32> code,
                                                      const Shader::Info& info, size_t perm_idx) {
+    using namespace Common::FS;
     if (pipeline_forensics_run_directory.empty() || !module || code.empty()) {
         return;
     }
