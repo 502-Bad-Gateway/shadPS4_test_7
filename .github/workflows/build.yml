@@ -3,19 +3,14 @@
 
 name: Build and Release
 
-# Temporary one-shot lightweight run. It uses the same concurrency group as the
-# original multi-OS workflow so this push cancels the already-running generic CI.
+# The generic upstream multi-OS CI is intentionally disabled on this experimental
+# Windows 7 dumb-GPU branch. Use the dedicated Win7 dumb-GPU workflow instead.
 on:
-  push:
-    branches: [win7-v1-dumb-gpu]
-
-concurrency:
-  group: ci-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_dispatch:
 
 jobs:
-  cancel-old-generic-build:
+  disabled-on-win7-dumb-gpu:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - name: Generic CI disabled for this branch
-        run: echo "Cancelling the previous multi-OS Build and Release run; Win7 dumb-GPU uses its dedicated workflow."
+      - run: echo "Generic Build and Release is disabled on win7-v1-dumb-gpu."
