@@ -287,8 +287,8 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
 
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     LOG_INFO(Render_Vulkan,
-             "Windows 7 Vulkan 1.2 presenter compatibility active; guest rendering remains "
-             "disabled by null GPU");
+             "Windows 7 Vulkan 1.2 compatibility active; guest rendering uses legacy "
+             "RenderPass2 when null_gpu=false");
 #endif
 
     const auto layers = GetInstanceLayers(enable_validation, enable_crash_diagnostic);

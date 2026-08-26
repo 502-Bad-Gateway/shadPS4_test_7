@@ -97,6 +97,14 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     state.depth_stencil_attachment.image_layout = vk::ImageLayout::eDepthAttachmentOptimal;
     state.depth_stencil_attachment.has_depth = true;
     state.depth_stencil_attachment.depth_clear = true;
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Vulkan::LegacyRenderPassKey render_pass_key{};
+    render_pass_key.depth_format = dst_pixel_format;
+    render_pass_key.depth_samples = ToSampleCount(num_samples);
+    render_pass_key.depth_layout = state.depth_stencil_attachment.image_layout;
+    render_pass_key.has_depth = true;
+    state.render_pass = instance.GetLegacyRenderPass(render_pass_key);
+#endif
     scheduler.BeginRendering(state);
 
     const auto cmdbuf = scheduler.CommandBuffer();
@@ -198,6 +206,14 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
     state.color_attachments[0].image_view = dst_view;
     state.color_attachments[0].image_layout = vk::ImageLayout::eColorAttachmentOptimal;
     state.color_attachments[0].is_clear = true;
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Vulkan::LegacyRenderPassKey render_pass_key{};
+    render_pass_key.color_count = 1;
+    render_pass_key.color_formats[0] = pixel_format;
+    render_pass_key.color_samples[0] = ToSampleCount(num_samples);
+    render_pass_key.color_layouts[0] = state.color_attachments[0].image_layout;
+    state.render_pass = instance.GetLegacyRenderPass(render_pass_key);
+#endif
     scheduler.BeginRendering(state);
 
     const auto cmdbuf = scheduler.CommandBuffer();
@@ -301,8 +317,13 @@ void BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
         .depthWriteEnable = true,
         .depthCompareOp = vk::CompareOp::eAlways,
     };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const std::array dynamic_states = {vk::DynamicState::eViewportWithCountEXT,
+                                       vk::DynamicState::eScissorWithCountEXT};
+#else
     const std::array dynamic_states = {vk::DynamicState::eViewportWithCount,
                                        vk::DynamicState::eScissorWithCount};
+#endif
     const vk::PipelineDynamicStateCreateInfo dynamic_info = {
         .dynamicStateCount = static_cast<u32>(dynamic_states.size()),
         .pDynamicStates = dynamic_states.data(),
@@ -320,12 +341,21 @@ void BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
         .pName = "main",
     };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Vulkan::LegacyRenderPassKey render_pass_key{};
+    render_pass_key.depth_format = key.attachment_format;
+    render_pass_key.depth_samples = ToSampleCount(key.num_samples);
+    render_pass_key.depth_layout = vk::ImageLayout::eDepthAttachmentOptimal;
+    render_pass_key.has_depth = true;
+    const vk::RenderPass legacy_render_pass = instance.GetLegacyRenderPass(render_pass_key);
+#else
     const vk::PipelineRenderingCreateInfo pipeline_rendering_ci = {
         .colorAttachmentCount = 0U,
         .pColorAttachmentFormats = nullptr,
         .depthAttachmentFormat = key.attachment_format,
         .stencilAttachmentFormat = vk::Format::eUndefined,
     };
+#endif
 
     const vk::PipelineColorBlendStateCreateInfo color_blending{};
     const vk::PipelineViewportStateCreateInfo viewport_info{};
@@ -333,7 +363,11 @@ void BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
     const vk::PipelineRasterizationStateCreateInfo raster_state{.lineWidth = 1.f};
 
     const vk::GraphicsPipelineCreateInfo pipeline_info = {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .pNext = nullptr,
+#else
         .pNext = &pipeline_rendering_ci,
+#endif
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
         .pVertexInputState = &vertex_input_info,
@@ -345,6 +379,9 @@ void BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_info,
         .layout = *single_texture_pl_layout,
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .renderPass = legacy_render_pass,
+#endif
     };
 
     auto [pipeline_result, pipeline] =
@@ -368,8 +405,13 @@ void BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
         .depthWriteEnable = false,
         .depthCompareOp = vk::CompareOp::eAlways,
     };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const std::array dynamic_states = {vk::DynamicState::eViewportWithCountEXT,
+                                       vk::DynamicState::eScissorWithCountEXT};
+#else
     const std::array dynamic_states = {vk::DynamicState::eViewportWithCount,
                                        vk::DynamicState::eScissorWithCount};
+#endif
     const vk::PipelineDynamicStateCreateInfo dynamic_info = {
         .dynamicStateCount = static_cast<u32>(dynamic_states.size()),
         .pDynamicStates = dynamic_states.data(),
@@ -387,12 +429,21 @@ void BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
         .pName = "main",
     };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Vulkan::LegacyRenderPassKey render_pass_key{};
+    render_pass_key.color_count = 1;
+    render_pass_key.color_formats[0] = key.attachment_format;
+    render_pass_key.color_samples[0] = ToSampleCount(key.num_samples);
+    render_pass_key.color_layouts[0] = vk::ImageLayout::eColorAttachmentOptimal;
+    const vk::RenderPass legacy_render_pass = instance.GetLegacyRenderPass(render_pass_key);
+#else
     const vk::PipelineRenderingCreateInfo pipeline_rendering_ci = {
         .colorAttachmentCount = 1u,
         .pColorAttachmentFormats = &key.attachment_format,
         .depthAttachmentFormat = vk::Format::eUndefined,
         .stencilAttachmentFormat = vk::Format::eUndefined,
     };
+#endif
 
     const vk::PipelineColorBlendAttachmentState attachment = {
         .blendEnable = false,
@@ -411,7 +462,11 @@ void BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
     const vk::PipelineRasterizationStateCreateInfo raster_state{.lineWidth = 1.f};
 
     const vk::GraphicsPipelineCreateInfo pipeline_info = {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .pNext = nullptr,
+#else
         .pNext = &pipeline_rendering_ci,
+#endif
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
         .pVertexInputState = &vertex_input_info,
@@ -423,6 +478,9 @@ void BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_info,
         .layout = *single_texture_pl_layout,
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .renderPass = legacy_render_pass,
+#endif
     };
 
     auto [pipeline_result, pipeline] =

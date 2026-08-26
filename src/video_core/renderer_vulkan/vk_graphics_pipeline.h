@@ -10,6 +10,9 @@
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_depth.h"
 #include "video_core/amdgpu/regs_primitive.h"
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+#include "video_core/renderer_vulkan/vk_instance.h"
+#endif
 #include "video_core/renderer_vulkan/vk_pipeline_common.h"
 
 namespace VideoCore {
@@ -101,6 +104,12 @@ public:
         return key;
     }
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const LegacyRenderPassKey& GetLegacyRenderPassKey() const {
+        return legacy_render_pass_key;
+    }
+#endif
+
     /// Gets the attributes and bindings for vertex inputs.
     template <typename Attribute, typename Binding>
     void GetVertexInputs(VertexInputs<Attribute>& attributes, VertexInputs<Binding>& bindings,
@@ -114,6 +123,9 @@ private:
 private:
     GraphicsPipelineKey key;
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    LegacyRenderPassKey legacy_render_pass_key{};
+#endif
 };
 
 struct ClipDistanceShaderKey {

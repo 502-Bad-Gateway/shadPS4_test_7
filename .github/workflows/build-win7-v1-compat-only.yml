@@ -1,4 +1,4 @@
-name: Build shadPS4 Win7 V1 settings override
+name: Build shadPS4 Win7 V1 guest Vulkan 1.2
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 settings-override target
+    name: Build Windows 7 x64 guest Vulkan 1.2 target
     runs-on: windows-2022
     timeout-minutes: 120
 
@@ -68,7 +68,7 @@ jobs:
             -Uri 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' `
             -OutFile (Join-Path $jsonDir 'json.hpp')
 
-      - name: Configure Windows 7 settings-override build
+      - name: Configure Windows 7 guest Vulkan 1.2 build
         shell: pwsh
         run: |
           $env:SOURCE_DATE_EPOCH = '0'
@@ -162,7 +162,7 @@ jobs:
           $stringsTool = Join-Path $env:LLVM_MINGW_ROOT 'bin/llvm-strings.exe'
           $strings = (& $stringsTool (Join-Path $output 'shadps4.exe') | Out-String)
           foreach ($required in @('Windows 7 compatibility-only settings active',
-                                  'Windows 7 Vulkan 1.2 presenter compatibility active')) {
+                                  'Windows 7 Vulkan 1.2 compatibility active')) {
               if (!$strings.Contains($required)) { throw "Required marker missing: $required" }
           }
           foreach ($forbidden in @('Windows 7 NVIDIA sampler workaround',
@@ -174,8 +174,8 @@ jobs:
           @"
           lineage=clean-upstream-7fb1a530
           upstream_commit=7fb1a530c15415097836521fec6f3483e27c81ae
-          phase=windows7-compatibility-only-v1
-          single_axis=settings-precedence-nullgpu-default-false
+          phase=windows7-vulkan-compatibility-v1
+          single_axis=guest-vulkan12-renderpass-ext-dispatch
           emulator_toolchain=clang-cl-msvc-ucrt
           emulator_target=x86_64-pc-windows-msvc
           launcher_toolchain=llvm-mingw-20260616-msvcrt-x86_64-static
@@ -183,8 +183,8 @@ jobs:
           null_gpu_default=false
           show_splash_default=true
           show_fps_counter_default=true
-          vulkan_compat_scope=presenter-only
-          vulkan_guest_compat_patches=false
+          vulkan_compat_scope=presenter-and-guest-rendering
+          vulkan_guest_compat_patches=true
           "@ | Out-File -Encoding ascii (Join-Path $output 'BUILD-IDENTITY.txt')
 
           $hashLines = @(Get-ChildItem $output -File |
@@ -195,10 +195,10 @@ jobs:
               } | Sort-Object)
           $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
 
-      - name: Upload Windows 7 V1 settings-override artifact
+      - name: Upload Windows 7 V1 guest Vulkan 1.2 artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shadps4-win7-v1-settings-override-${{ github.sha }}
+          name: shadps4-win7-v1-guest-vulkan12-${{ github.sha }}
           path: artifact/
           if-no-files-found: error
           retention-days: 30

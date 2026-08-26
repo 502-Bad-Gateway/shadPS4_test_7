@@ -22,8 +22,23 @@
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 
-// Vulkan 1.2 exposes synchronization2 through its KHR extension entry points. Keep the shared
-// presenter call sites while selecting those entry points only for the Windows 7 build.
+// Vulkan 1.2 exposes synchronization2 and the first two extended-dynamic-state revisions through
+// extension entry points. Keep the renderer call sites shared while using those entry points in
+// the Windows 7 compatibility build.
 #ifdef SHADPS4_WINDOWS_7_COMPAT
+#define bindVertexBuffers2 bindVertexBuffers2EXT
 #define pipelineBarrier2 pipelineBarrier2KHR
+#define setCullMode setCullModeEXT
+#define setDepthBiasEnable setDepthBiasEnableEXT
+#define setDepthBoundsTestEnable setDepthBoundsTestEnableEXT
+#define setDepthCompareOp setDepthCompareOpEXT
+#define setDepthTestEnable setDepthTestEnableEXT
+#define setDepthWriteEnable setDepthWriteEnableEXT
+#define setFrontFace setFrontFaceEXT
+#define setPrimitiveRestartEnable setPrimitiveRestartEnableEXT
+#define setRasterizerDiscardEnable setRasterizerDiscardEnableEXT
+#define setScissorWithCount setScissorWithCountEXT
+#define setStencilOp setStencilOpEXT
+#define setStencilTestEnable setStencilTestEnableEXT
+#define setViewportWithCount setViewportWithCountEXT
 #endif

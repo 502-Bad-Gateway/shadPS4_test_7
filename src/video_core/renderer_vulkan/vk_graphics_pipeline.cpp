@@ -136,6 +136,28 @@ GraphicsPipeline::GraphicsPipeline(
         .pNext = instance.IsDepthClipControlSupported() ? &clip_control : nullptr,
     };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    boost::container::static_vector<vk::DynamicState, 32> dynamic_states = {
+        vk::DynamicState::eViewportWithCountEXT,
+        vk::DynamicState::eScissorWithCountEXT,
+        vk::DynamicState::eBlendConstants,
+        vk::DynamicState::eDepthTestEnableEXT,
+        vk::DynamicState::eDepthWriteEnableEXT,
+        vk::DynamicState::eDepthCompareOpEXT,
+        vk::DynamicState::eDepthBiasEnableEXT,
+        vk::DynamicState::eDepthBias,
+        vk::DynamicState::eStencilTestEnableEXT,
+        vk::DynamicState::eStencilReference,
+        vk::DynamicState::eStencilCompareMask,
+        vk::DynamicState::eStencilWriteMask,
+        vk::DynamicState::eStencilOpEXT,
+        vk::DynamicState::eCullModeEXT,
+        vk::DynamicState::eFrontFaceEXT,
+        vk::DynamicState::eRasterizerDiscardEnableEXT,
+        vk::DynamicState::eLineWidth,
+        vk::DynamicState::ePrimitiveRestartEnableEXT,
+    };
+#else
     boost::container::static_vector<vk::DynamicState, 32> dynamic_states = {
         vk::DynamicState::eViewportWithCount,  vk::DynamicState::eScissorWithCount,
         vk::DynamicState::eBlendConstants,     vk::DynamicState::eDepthTestEnable,
@@ -147,9 +169,14 @@ GraphicsPipeline::GraphicsPipeline(
         vk::DynamicState::eFrontFace,          vk::DynamicState::eRasterizerDiscardEnable,
         vk::DynamicState::eLineWidth,          vk::DynamicState::ePrimitiveRestartEnable,
     };
+#endif
 
     if (instance.IsDepthBoundsSupported()) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        dynamic_states.push_back(vk::DynamicState::eDepthBoundsTestEnableEXT);
+#else
         dynamic_states.push_back(vk::DynamicState::eDepthBoundsTestEnable);
+#endif
         dynamic_states.push_back(vk::DynamicState::eDepthBounds);
     }
     if (instance.IsDynamicColorWriteMaskSupported()) {
@@ -158,7 +185,11 @@ GraphicsPipeline::GraphicsPipeline(
     if (instance.IsVertexInputDynamicState()) {
         dynamic_states.push_back(vk::DynamicState::eVertexInputEXT);
     } else if (!sdata.vertex_bindings.empty()) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        dynamic_states.push_back(vk::DynamicState::eVertexInputBindingStrideEXT);
+#else
         dynamic_states.push_back(vk::DynamicState::eVertexInputBindingStride);
+#endif
     }
 
     const vk::PipelineDynamicStateCreateInfo dynamic_info = {
@@ -247,7 +278,7 @@ GraphicsPipeline::GraphicsPipeline(
     const auto depth_format =
         instance.GetSupportedFormat(LiverpoolToVK::DepthFormat(key.z_format, key.stencil_format),
                                     vk::FormatFeatureFlagBits2::eDepthStencilAttachment);
-    std::array<vk::Format, Shader::IR::NumRenderTargets> color_formats;
+    std::array<vk::Format, Shader::IR::NumRenderTargets> color_formats{};
     for (s32 i = 0; i < key.num_color_attachments; ++i) {
         const auto& col_buf = key.color_buffers[i];
         const auto format = LiverpoolToVK::SurfaceFormat(col_buf.data_format, col_buf.num_format);
@@ -274,6 +305,22 @@ GraphicsPipeline::GraphicsPipeline(
             LiverpoolToVK::NumSamples(key.depth_samples, instance.GetDepthSampleCounts()),
     };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    legacy_render_pass_key.color_count = key.num_color_attachments;
+    for (u32 index = 0; index < key.num_color_attachments; ++index) {
+        if (key.mrt_mask & (1U << index)) {
+            legacy_render_pass_key.color_formats[index] = color_formats[index];
+            legacy_render_pass_key.color_samples[index] = color_samples[index];
+        }
+    }
+    legacy_render_pass_key.depth_format = depth_format;
+    legacy_render_pass_key.depth_samples =
+        LiverpoolToVK::NumSamples(key.depth_samples, instance.GetDepthSampleCounts());
+    legacy_render_pass_key.has_depth = key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid;
+    legacy_render_pass_key.has_stencil =
+        key.stencil_format != AmdGpu::DepthBuffer::StencilFormat::Invalid;
+    const vk::RenderPass legacy_render_pass = instance.GetLegacyRenderPass(legacy_render_pass_key);
+#else
     const vk::PipelineRenderingCreateInfo pipeline_rendering_ci = {
         .pNext = instance.IsMixedDepthSamplesSupported() ? &mixed_samples : nullptr,
         .colorAttachmentCount = key.num_color_attachments,
@@ -285,6 +332,7 @@ GraphicsPipeline::GraphicsPipeline(
                                        ? depth_format
                                        : vk::Format::eUndefined,
     };
+#endif
 
     std::array<vk::PipelineColorBlendAttachmentState, AmdGpu::NUM_COLOR_BUFFERS> attachments;
     for (u32 i = 0; i < key.num_color_attachments; i++) {
@@ -368,7 +416,11 @@ GraphicsPipeline::GraphicsPipeline(
     constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
 
     const vk::GraphicsPipelineCreateInfo pipeline_info = {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .pNext = nullptr,
+#else
         .pNext = &pipeline_rendering_ci,
+#endif
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
         .pVertexInputState = !instance.IsVertexInputDynamicState() ? &vertex_input_info : nullptr,
@@ -382,6 +434,9 @@ GraphicsPipeline::GraphicsPipeline(
         .pColorBlendState = &color_blending,
         .pDynamicState = &dynamic_info,
         .layout = *pipeline_layout,
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        .renderPass = legacy_render_pass,
+#endif
     };
 
     auto [pipeline_result, pipe] =

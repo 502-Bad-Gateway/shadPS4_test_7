@@ -26,6 +26,11 @@ Scheduler::~Scheduler() {
 #if TRACY_GPU_ENABLED
     std::free(profiler_scope);
 #endif
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    if (legacy_framebuffer) {
+        instance.GetDevice().destroyFramebuffer(legacy_framebuffer);
+    }
+#endif
 }
 
 void Scheduler::BeginRendering(const RenderState& new_state) {
@@ -36,6 +41,81 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     is_rendering = true;
     render_state = new_state;
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    boost::container::static_vector<vk::ImageView, 9> attachment_views;
+    for (u32 index = 0; index < render_state.num_color_attachments; ++index) {
+        if (render_state.color_attachments[index].image_view) {
+            attachment_views.push_back(render_state.color_attachments[index].image_view);
+        }
+    }
+    const auto& db = render_state.depth_stencil_attachment;
+    if (db.image_view && (db.has_depth || db.has_stencil)) {
+        attachment_views.push_back(db.image_view);
+    }
+
+    const vk::FramebufferCreateInfo framebuffer_info{
+        .renderPass = render_state.render_pass,
+        .attachmentCount = static_cast<u32>(attachment_views.size()),
+        .pAttachments = attachment_views.data(),
+        .width = render_state.width,
+        .height = render_state.height,
+        .layers = render_state.num_layers,
+    };
+    auto [framebuffer_result, framebuffer] =
+        instance.GetDevice().createFramebuffer(framebuffer_info);
+    ASSERT_MSG(framebuffer_result == vk::Result::eSuccess,
+               "Failed to create concrete legacy framebuffer: {}",
+               vk::to_string(framebuffer_result));
+    legacy_framebuffer = framebuffer;
+
+    const vk::RenderPassBeginInfo begin_info{
+        .renderPass = render_state.render_pass,
+        .framebuffer = legacy_framebuffer,
+        .renderArea =
+            {
+                .offset = {0, 0},
+                .extent = {render_state.width, render_state.height},
+            },
+    };
+    const vk::SubpassBeginInfo subpass_begin_info{
+        .contents = vk::SubpassContents::eInline,
+    };
+    current_cmdbuf.beginRenderPass2(begin_info, subpass_begin_info);
+
+    boost::container::static_vector<vk::ClearAttachment, 9> clear_attachments;
+    for (u32 index = 0; index < render_state.num_color_attachments; ++index) {
+        const auto& color = render_state.color_attachments[index];
+        if (color.image_view && color.is_clear) {
+            clear_attachments.emplace_back(vk::ClearAttachment{
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .colorAttachment = index,
+                .clearValue =
+                    vk::ClearValue{.color = vk::ClearColorValue{.uint32 = color.clear_value}},
+            });
+        }
+    }
+    if (db.image_view && (db.depth_clear || db.stencil_clear)) {
+        vk::ImageAspectFlags aspects{};
+        aspects |= db.depth_clear ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlags{};
+        aspects |= db.stencil_clear ? vk::ImageAspectFlagBits::eStencil : vk::ImageAspectFlags{};
+        clear_attachments.emplace_back(vk::ClearAttachment{
+            .aspectMask = aspects,
+            .clearValue = vk::ClearValue{.depthStencil =
+                                             vk::ClearDepthStencilValue{
+                                                 .depth = std::bit_cast<float>(db.clear_value[0]),
+                                                 .stencil = db.clear_value[1],
+                                             }},
+        });
+    }
+    if (!clear_attachments.empty()) {
+        const vk::ClearRect clear_rect{
+            .rect = begin_info.renderArea,
+            .baseArrayLayer = 0,
+            .layerCount = render_state.num_layers,
+        };
+        current_cmdbuf.clearAttachments(clear_attachments, clear_rect);
+    }
+#else
     std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
     for (u32 i = 0; i < render_state.num_color_attachments; ++i) {
         const auto& cb = render_state.color_attachments[i];
@@ -81,6 +161,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     };
 
     current_cmdbuf.beginRendering(rendering_info);
+#endif
 }
 
 void Scheduler::EndRendering() {
@@ -88,7 +169,16 @@ void Scheduler::EndRendering() {
         return;
     }
     is_rendering = false;
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const vk::SubpassEndInfo subpass_end_info{};
+    current_cmdbuf.endRenderPass2(subpass_end_info);
+    const vk::Framebuffer framebuffer = legacy_framebuffer;
+    legacy_framebuffer = nullptr;
+    const vk::Device device = instance.GetDevice();
+    DeferOperation([device, framebuffer] { device.destroyFramebuffer(framebuffer); });
+#else
     current_cmdbuf.endRendering();
+#endif
 }
 
 void Scheduler::Flush(SubmitInfo& info) {

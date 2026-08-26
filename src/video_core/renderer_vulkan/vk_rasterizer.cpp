@@ -987,6 +987,19 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         state.num_layers = 1;
     }
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    LegacyRenderPassKey render_pass_key = pipeline->GetLegacyRenderPassKey();
+    for (u32 index = 0; index < state.num_color_attachments; ++index) {
+        if (state.color_attachments[index].image_view) {
+            render_pass_key.color_layouts[index] = state.color_attachments[index].image_layout;
+        }
+    }
+    if (state.depth_stencil_attachment.image_view) {
+        render_pass_key.depth_layout = state.depth_stencil_attachment.image_layout;
+    }
+    state.render_pass = instance.GetLegacyRenderPass(render_pass_key);
+#endif
+
     return state;
 }
 

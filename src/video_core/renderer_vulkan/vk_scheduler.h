@@ -41,6 +41,9 @@ static_assert(std::has_unique_object_representations_v<RenderAttachment>);
 struct RenderState {
     std::array<RenderAttachment, 8> color_attachments;
     RenderAttachment depth_stencil_attachment;
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    vk::RenderPass render_pass;
+#endif
     u16 width;
     u16 height;
     u16 num_layers;
@@ -451,6 +454,9 @@ private:
     std::condition_variable_any priority_pending_ops_cv;
     std::jthread priority_pending_ops_thread;
     RenderState render_state;
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    vk::Framebuffer legacy_framebuffer;
+#endif
     bool is_rendering = false;
     tracy::VkCtxScope* profiler_scope{};
 };

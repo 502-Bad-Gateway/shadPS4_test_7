@@ -351,7 +351,10 @@ bool Instance::CreateDevice() {
         physical_device
             .getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features,
                           vk::PhysicalDeviceVulkan12Features,
+                          vk::PhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT,
                           vk::PhysicalDeviceSynchronization2FeaturesKHR,
+                          vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+                          vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT,
                           vk::PhysicalDeviceRobustness2FeaturesEXT,
                           vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
                           vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT,
@@ -431,13 +434,34 @@ bool Instance::CreateDevice() {
                "Required Vulkan feature unavailable: nullDescriptor");
 
 #ifdef SHADPS4_WINDOWS_7_COMPAT
+    ASSERT_MSG(add_extension(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME),
+               "Required Vulkan extension unavailable: {}",
+               VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME);
     ASSERT_MSG(add_extension(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME),
                "Required Vulkan extension unavailable: {}",
                VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    ASSERT_MSG(add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME),
+               "Required Vulkan extension unavailable: {}",
+               VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
+    ASSERT_MSG(add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
+               "Required Vulkan extension unavailable: {}",
+               VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME);
+    const auto demote_features =
+        feature_chain.get<vk::PhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT>();
     const auto synchronization2_features =
         feature_chain.get<vk::PhysicalDeviceSynchronization2FeaturesKHR>();
+    const auto dynamic_state_features =
+        feature_chain.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+    const auto dynamic_state_2_features =
+        feature_chain.get<vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT>();
+    ASSERT_MSG(demote_features.shaderDemoteToHelperInvocation,
+               "Required Vulkan feature unavailable: shaderDemoteToHelperInvocation");
     ASSERT_MSG(synchronization2_features.synchronization2,
                "Required Vulkan feature unavailable: synchronization2");
+    ASSERT_MSG(dynamic_state_features.extendedDynamicState,
+               "Required Vulkan feature unavailable: extendedDynamicState");
+    ASSERT_MSG(dynamic_state_2_features.extendedDynamicState2,
+               "Required Vulkan feature unavailable: extendedDynamicState2");
 #endif
 
     // Optional
@@ -626,8 +650,17 @@ bool Instance::CreateDevice() {
             .maintenance4 = vk13_features.maintenance4,
         },
 #ifdef SHADPS4_WINDOWS_7_COMPAT
+        vk::PhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT{
+            .shaderDemoteToHelperInvocation = true,
+        },
         vk::PhysicalDeviceSynchronization2FeaturesKHR{
             .synchronization2 = true,
+        },
+        vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{
+            .extendedDynamicState = true,
+        },
+        vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT{
+            .extendedDynamicState2 = true,
         },
 #endif
         // Extensions
