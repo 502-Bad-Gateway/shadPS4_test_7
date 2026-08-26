@@ -42,17 +42,107 @@ std::vector<std::string> GetSupportedExtensions(vk::PhysicalDevice physical) {
     return supported_extensions;
 }
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+bool IsStorageWithoutFormatFormat(vk::Format format) {
+    switch (format) {
+    case vk::Format::eR8G8B8A8Unorm:
+    case vk::Format::eR8G8B8A8Snorm:
+    case vk::Format::eR8G8B8A8Uint:
+    case vk::Format::eR8G8B8A8Sint:
+    case vk::Format::eR32Uint:
+    case vk::Format::eR32Sint:
+    case vk::Format::eR32Sfloat:
+    case vk::Format::eR32G32Uint:
+    case vk::Format::eR32G32Sint:
+    case vk::Format::eR32G32Sfloat:
+    case vk::Format::eR32G32B32A32Uint:
+    case vk::Format::eR32G32B32A32Sint:
+    case vk::Format::eR32G32B32A32Sfloat:
+    case vk::Format::eR16G16B16A16Uint:
+    case vk::Format::eR16G16B16A16Sint:
+    case vk::Format::eR16G16B16A16Sfloat:
+    case vk::Format::eR16G16Sfloat:
+    case vk::Format::eB10G11R11UfloatPack32:
+    case vk::Format::eR16Sfloat:
+    case vk::Format::eR16G16B16A16Unorm:
+    case vk::Format::eA2B10G10R10UnormPack32:
+    case vk::Format::eR16G16Unorm:
+    case vk::Format::eR8G8Unorm:
+    case vk::Format::eR16Unorm:
+    case vk::Format::eR8Unorm:
+    case vk::Format::eR16G16B16A16Snorm:
+    case vk::Format::eR16G16Snorm:
+    case vk::Format::eR8G8Snorm:
+    case vk::Format::eR16Snorm:
+    case vk::Format::eR8Snorm:
+    case vk::Format::eR16G16Sint:
+    case vk::Format::eR8G8Sint:
+    case vk::Format::eR16Sint:
+    case vk::Format::eR8Sint:
+    case vk::Format::eA2B10G10R10UintPack32:
+    case vk::Format::eR16G16Uint:
+    case vk::Format::eR8G8Uint:
+    case vk::Format::eR16Uint:
+    case vk::Format::eR8Uint:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool HasDepthComponent(vk::Format format) {
+    switch (format) {
+    case vk::Format::eD16Unorm:
+    case vk::Format::eX8D24UnormPack32:
+    case vk::Format::eD32Sfloat:
+    case vk::Format::eD16UnormS8Uint:
+    case vk::Format::eD24UnormS8Uint:
+    case vk::Format::eD32SfloatS8Uint:
+        return true;
+    default:
+        return false;
+    }
+}
+
+vk::FormatFeatureFlags2 ExpandLegacyFormatFeatures(vk::Format format,
+                                                   vk::FormatFeatureFlags legacy,
+                                                   const vk::PhysicalDeviceFeatures& features,
+                                                   bool buffer_features) {
+    vk::FormatFeatureFlags2 result{
+        static_cast<VkFormatFeatureFlags2>(static_cast<VkFormatFeatureFlags>(legacy))};
+
+    if (IsStorageWithoutFormatFormat(format)) {
+        const bool storage_capable =
+            buffer_features
+                ? static_cast<bool>(legacy & vk::FormatFeatureFlagBits::eStorageTexelBuffer)
+                : static_cast<bool>(legacy & vk::FormatFeatureFlagBits::eStorageImage);
+        if (storage_capable && features.shaderStorageImageReadWithoutFormat) {
+            result |= vk::FormatFeatureFlagBits2::eStorageReadWithoutFormat;
+        }
+        if (storage_capable && features.shaderStorageImageWriteWithoutFormat) {
+            result |= vk::FormatFeatureFlagBits2::eStorageWriteWithoutFormat;
+        }
+    }
+
+    if (!buffer_features && HasDepthComponent(format) &&
+        static_cast<bool>(legacy & vk::FormatFeatureFlagBits::eSampledImage)) {
+        result |= vk::FormatFeatureFlagBits2::eSampledImageDepthComparison;
+    }
+    return result;
+}
+#endif
+
 vk::FormatProperties3 GetFormatProperties(vk::PhysicalDevice physical, vk::Format format) {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     const vk::FormatProperties properties = physical.getFormatProperties(format);
-    const auto widen = [](vk::FormatFeatureFlags flags) {
-        return vk::FormatFeatureFlags2{
-            static_cast<VkFormatFeatureFlags2>(static_cast<VkFormatFeatureFlags>(flags))};
-    };
+    const vk::PhysicalDeviceFeatures features = physical.getFeatures();
     return vk::FormatProperties3{
-        .linearTilingFeatures = widen(properties.linearTilingFeatures),
-        .optimalTilingFeatures = widen(properties.optimalTilingFeatures),
-        .bufferFeatures = widen(properties.bufferFeatures),
+        .linearTilingFeatures =
+            ExpandLegacyFormatFeatures(format, properties.linearTilingFeatures, features, false),
+        .optimalTilingFeatures =
+            ExpandLegacyFormatFeatures(format, properties.optimalTilingFeatures, features, false),
+        .bufferFeatures =
+            ExpandLegacyFormatFeatures(format, properties.bufferFeatures, features, true),
     };
 #else
     vk::FormatProperties3 properties3{};

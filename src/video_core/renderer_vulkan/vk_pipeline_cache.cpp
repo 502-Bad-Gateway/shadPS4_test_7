@@ -349,7 +349,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
         }
         fetch_shader.reset();
     }
-    return it->second.get();
+    return it->second->IsValid() ? it->second.get() : nullptr;
 }
 
 const ComputePipeline* PipelineCache::GetComputePipeline() {
@@ -373,7 +373,7 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
             module_related_pipelines[m].emplace_back(compute_key);
         }
     }
-    return it->second.get();
+    return it->second->IsValid() ? it->second.get() : nullptr;
 }
 
 bool PipelineCache::RefreshGraphicsKey() {

@@ -6,6 +6,7 @@
 #include <boost/container/small_vector.hpp>
 
 #include "common/assert.h"
+#include "core/emulator_settings.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_discard_frag.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_quad_rect.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -39,6 +40,10 @@ GraphicsPipeline::GraphicsPipeline(
     const vk::Device device = instance.GetDevice();
     std::ranges::copy(infos, stages.begin());
     BuildDescSetLayout(preloading);
+    if (!desc_layout && EmulatorSettings.IsDumbGPU()) {
+        LOG_WARNING(Render_Vulkan, "Dumb GPU: skipping graphics pipeline with invalid descriptor layout");
+        return;
+    }
     const auto debug_str = GetDebugString();
 
     const vk::PushConstantRange push_constants = {
@@ -55,6 +60,11 @@ GraphicsPipeline::GraphicsPipeline(
         .pPushConstantRanges = &push_constants,
     };
     auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
+    if (layout_result != vk::Result::eSuccess && EmulatorSettings.IsDumbGPU()) {
+        LOG_WARNING(Render_Vulkan, "Dumb GPU: skipping graphics pipeline; layout creation failed: {}",
+                    vk::to_string(layout_result));
+        return;
+    }
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
                "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
     pipeline_layout = std::move(layout);
@@ -367,7 +377,7 @@ GraphicsPipeline::GraphicsPipeline(
     // In practice, we use dynamic state for all of it.
     constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
 
-    const vk::GraphicsPipelineCreateInfo pipeline_info = {
+    vk::GraphicsPipelineCreateInfo pipeline_info = {
         .pNext = &pipeline_rendering_ci,
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
@@ -384,8 +394,37 @@ GraphicsPipeline::GraphicsPipeline(
         .layout = *pipeline_layout,
     };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    LegacyRenderPassKey legacy_key{};
+    legacy_key.color_count = key.num_color_attachments;
+    for (u32 i = 0; i < key.num_color_attachments; ++i) {
+        legacy_key.color_formats[i] = color_formats[i];
+        legacy_key.color_samples[i] = color_samples[i];
+        legacy_key.color_layouts[i] = vk::ImageLayout::eColorAttachmentOptimal;
+    }
+    legacy_key.has_depth = key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid;
+    legacy_key.has_stencil = key.stencil_format != AmdGpu::DepthBuffer::StencilFormat::Invalid;
+    if (legacy_key.has_depth || legacy_key.has_stencil) {
+        legacy_key.depth_format = depth_format;
+        legacy_key.depth_samples =
+            key.depth_samples
+                ? LiverpoolToVK::NumSamples(key.depth_samples, instance.GetDepthSampleCounts())
+                : vk::SampleCountFlagBits::e1;
+        legacy_key.depth_layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+    }
+    // VkAttachmentSampleCountInfoAMD is also valid on the traditional-render-pass path.
+    pipeline_info.pNext = instance.IsMixedDepthSamplesSupported() ? &mixed_samples : nullptr;
+    pipeline_info.renderPass = instance.GetLegacyRenderPass(legacy_key);
+    pipeline_info.subpass = 0;
+#endif
+
     auto [pipeline_result, pipe] =
         device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
+    if (pipeline_result != vk::Result::eSuccess && EmulatorSettings.IsDumbGPU()) {
+        LOG_WARNING(Render_Vulkan, "Dumb GPU: dropping graphics pipeline {}: {}", debug_str,
+                    vk::to_string(pipeline_result));
+        return;
+    }
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
                vk::to_string(pipeline_result));
     pipeline = std::move(pipe);
@@ -497,6 +536,12 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
     };
     auto [layout_result, layout] =
         instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
+    if (layout_result != vk::Result::eSuccess && EmulatorSettings.IsDumbGPU()) {
+        LOG_WARNING(Render_Vulkan,
+                    "Dumb GPU: graphics descriptor set layout creation failed: {}",
+                    vk::to_string(layout_result));
+        return;
+    }
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
                "Failed to create graphics descriptor set layout: {}", vk::to_string(layout_result));
     desc_layout = std::move(layout);

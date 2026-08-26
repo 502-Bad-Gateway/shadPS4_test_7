@@ -25,6 +25,8 @@ class Instance;
 struct RenderAttachment {
     vk::ImageView image_view;
     vk::ImageLayout image_layout;
+    vk::Format format;
+    vk::SampleCountFlagBits samples{vk::SampleCountFlagBits::e1};
     std::array<u32, 4> clear_value;
     union {
         u32 is_clear;

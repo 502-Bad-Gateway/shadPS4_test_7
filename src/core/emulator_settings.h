@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -432,6 +432,9 @@ struct GPUSettings {
     Setting<u32> internal_screen_width{1280};
     Setting<u32> internal_screen_height{720};
     Setting<bool> null_gpu{false};
+    // Best-effort renderer: keep the real Vulkan device/rasterizer active, but allow
+    // unsupported guest GPU work to be skipped instead of aborting the emulator.
+    Setting<bool> dumb_gpu{false};
     Setting<bool> copy_gpu_buffers{false};
     Setting<u32> readbacks_mode{GpuReadbacksMode::Disabled};
     Setting<bool> readback_linear_images_enabled{false};
@@ -450,6 +453,7 @@ struct GPUSettings {
     std::vector<OverrideItem> GetOverrideableFields() const {
         return std::vector<OverrideItem>{
             make_override<GPUSettings>("null_gpu", &GPUSettings::null_gpu),
+            make_override<GPUSettings>("dumb_gpu", &GPUSettings::dumb_gpu),
             make_override<GPUSettings>("copy_gpu_buffers", &GPUSettings::copy_gpu_buffers),
             make_override<GPUSettings>("full_screen", &GPUSettings::full_screen),
             make_override<GPUSettings>("full_screen_mode", &GPUSettings::full_screen_mode),
@@ -471,12 +475,14 @@ struct GPUSettings {
         };
     }
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GPUSettings, window_width, window_height, internal_screen_width,
-                                   internal_screen_height, null_gpu, copy_gpu_buffers,
+// WITH_DEFAULT keeps existing config files valid when the new dumb_gpu key is absent.
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+    GPUSettings, window_width, window_height, internal_screen_width, internal_screen_height,
+    null_gpu, dumb_gpu, copy_gpu_buffers,
                                    readbacks_mode, readback_linear_images_enabled,
                                    direct_memory_access_enabled, dump_shaders, patch_shaders,
                                    vblank_frequency, full_screen, full_screen_mode, present_mode,
-                                   hdr_allowed, fsr_enabled, rcas_enabled, rcas_attenuation)
+    hdr_allowed, fsr_enabled, rcas_enabled, rcas_attenuation)
 // -------------------------------
 // Vulkan settings
 // -------------------------------
@@ -738,6 +744,7 @@ public:
 
     // GPU Settings
     SETTING_FORWARD_BOOL(m_gpu, NullGPU, null_gpu)
+    SETTING_FORWARD_BOOL(m_gpu, DumbGPU, dumb_gpu)
     SETTING_FORWARD_BOOL(m_gpu, DumpShaders, dump_shaders)
     SETTING_FORWARD_BOOL(m_gpu, CopyGpuBuffers, copy_gpu_buffers)
     SETTING_FORWARD_BOOL(m_gpu, FullScreen, full_screen)

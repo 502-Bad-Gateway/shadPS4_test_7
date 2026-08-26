@@ -495,6 +495,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     LOG_INFO(Config, "Log type: {}", EmulatorSettings.GetLogType());
 #endif
     LOG_INFO(Config, "GPU isNullGpu: {}", EmulatorSettings.IsNullGPU());
+    LOG_INFO(Config, "GPU isDumbGpu: {}", EmulatorSettings.IsDumbGPU());
     LOG_INFO(Config, "GPU readbacksMode: {}", EmulatorSettings.GetReadbacksMode());
     LOG_INFO(Config, "GPU readbackLinearImages: {}",
              EmulatorSettings.IsReadbackLinearImagesEnabled());

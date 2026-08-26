@@ -36,6 +36,88 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     is_rendering = true;
     render_state = new_state;
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    LegacyRenderPassKey legacy_key{};
+    legacy_key.color_count = render_state.num_color_attachments;
+
+    std::array<vk::ImageView, 9> attachment_views{};
+    std::array<vk::ClearAttachment, 9> clear_attachments{};
+    u32 attachment_count = 0;
+    u32 clear_count = 0;
+
+    for (u32 i = 0; i < render_state.num_color_attachments; ++i) {
+        const auto& cb = render_state.color_attachments[i];
+        if (!cb.image_view) {
+            continue;
+        }
+        legacy_key.color_formats[i] = cb.format;
+        legacy_key.color_samples[i] = cb.samples;
+        legacy_key.color_layouts[i] = cb.image_layout;
+        attachment_views[attachment_count++] = cb.image_view;
+        if (cb.is_clear) {
+            clear_attachments[clear_count++] = vk::ClearAttachment{
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .colorAttachment = i,
+                .clearValue = vk::ClearValue{
+                    .color = vk::ClearColorValue{.uint32 = cb.clear_value}},
+            };
+        }
+    }
+
+    const auto& db = render_state.depth_stencil_attachment;
+    legacy_key.has_depth = db.has_depth;
+    legacy_key.has_stencil = db.has_stencil;
+    if (db.has_depth || db.has_stencil) {
+        legacy_key.depth_format = db.format;
+        legacy_key.depth_samples = db.samples;
+        legacy_key.depth_layout = db.image_layout;
+        attachment_views[attachment_count++] = db.image_view;
+
+        vk::ImageAspectFlags clear_aspects{};
+        if (db.depth_clear) {
+            clear_aspects |= vk::ImageAspectFlagBits::eDepth;
+        }
+        if (db.stencil_clear) {
+            clear_aspects |= vk::ImageAspectFlagBits::eStencil;
+        }
+        if (clear_aspects) {
+            clear_attachments[clear_count++] = vk::ClearAttachment{
+                .aspectMask = clear_aspects,
+                .colorAttachment = 0,
+                .clearValue = vk::ClearValue{
+                    .depthStencil = vk::ClearDepthStencilValue{
+                        .depth = std::bit_cast<float>(db.clear_value[0]),
+                        .stencil = db.clear_value[1],
+                    }},
+            };
+        }
+    }
+
+    const LegacyRenderTarget target = instance.GetLegacyRenderTarget(
+        legacy_key, render_state.width, render_state.height, render_state.num_layers);
+    const vk::RenderPassAttachmentBeginInfo attachment_begin = {
+        .attachmentCount = attachment_count,
+        .pAttachments = attachment_views.data(),
+    };
+    const vk::RenderPassBeginInfo begin_info = {
+        .pNext = &attachment_begin,
+        .renderPass = target.render_pass,
+        .framebuffer = target.framebuffer,
+        .renderArea = {.offset = {0, 0}, .extent = {render_state.width, render_state.height}},
+    };
+    current_cmdbuf.beginRenderPass(begin_info, vk::SubpassContents::eInline);
+
+    // Cached compatibility render passes intentionally use LOAD. Reproduce dynamic-rendering
+    // CLEAR semantics explicitly so the same render pass stays reusable for clear/non-clear draws.
+    if (clear_count != 0) {
+        const vk::ClearRect clear_rect = {
+            .rect = {.offset = {0, 0}, .extent = {render_state.width, render_state.height}},
+            .baseArrayLayer = 0,
+            .layerCount = render_state.num_layers,
+        };
+        current_cmdbuf.clearAttachments(clear_count, clear_attachments.data(), 1, &clear_rect);
+    }
+#else
     std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
     for (u32 i = 0; i < render_state.num_color_attachments; ++i) {
         const auto& cb = render_state.color_attachments[i];
@@ -81,6 +163,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     };
 
     current_cmdbuf.beginRendering(rendering_info);
+#endif
 }
 
 void Scheduler::EndRendering() {
@@ -88,7 +171,11 @@ void Scheduler::EndRendering() {
         return;
     }
     is_rendering = false;
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    current_cmdbuf.endRenderPass();
+#else
     current_cmdbuf.endRendering();
+#endif
 }
 
 void Scheduler::Flush(SubmitInfo& info) {

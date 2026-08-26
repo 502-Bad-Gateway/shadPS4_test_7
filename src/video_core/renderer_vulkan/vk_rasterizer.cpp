@@ -918,6 +918,11 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         auto& attachment = state.color_attachments[cb];
         attachment.image_view = *image_view.image_view;
         attachment.image_layout = image->backing->state.layout;
+        attachment.format = image_view.info.format;
+        attachment.samples =
+            key.color_samples[cb]
+                ? LiverpoolToVK::NumSamples(key.color_samples[cb], instance.GetColorSampleCounts())
+                : vk::SampleCountFlagBits::e1;
         attachment.clear_value = clear_value.color.uint32;
         attachment.is_clear = is_clear;
 
@@ -965,6 +970,11 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         auto& attachment = state.depth_stencil_attachment;
         attachment.image_view = *image_view.image_view;
         attachment.image_layout = image.backing->state.layout;
+        attachment.format = image_view.info.format;
+        attachment.samples =
+            key.depth_samples
+                ? LiverpoolToVK::NumSamples(key.depth_samples, instance.GetDepthSampleCounts())
+                : vk::SampleCountFlagBits::e1;
         attachment.clear_value = {};
 
         if (regs.depth_buffer.DepthValid()) {

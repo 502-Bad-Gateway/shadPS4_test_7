@@ -52,6 +52,9 @@ void SettingsWindow::LoadSettings(std::string profile) {
     fullscreenModeSetting =
         GetComboIndex(EmulatorSettings.GetFullScreenMode(), fullscreenModeOptions);
     presentModeSetting = GetComboIndex(EmulatorSettings.GetPresentMode(), presentModeOptions);
+    gpuCompatibilityModeSetting = EmulatorSettings.IsNullGPU()
+                                      ? 2
+                                      : (EmulatorSettings.IsDumbGPU() ? 1 : 0);
     windowHeightSetting = EmulatorSettings.GetWindowHeight();
     windowWidthSetting = EmulatorSettings.GetWindowWidth();
     hdrAllowedSetting = EmulatorSettings.IsHdrAllowed();
@@ -116,6 +119,9 @@ void SettingsWindow::SaveSettings(std::string profile) {
     EmulatorSettings.SetFullScreen(isFullscreen);
     EmulatorSettings.SetFullScreenMode(fullscreenModeOptions.at(fullscreenModeSetting), isSpecific);
     EmulatorSettings.SetPresentMode(presentModeOptions.at(presentModeSetting), isSpecific);
+    // Null GPU wins over Dumb GPU; the combo always writes a mutually-exclusive state.
+    EmulatorSettings.SetDumbGPU(gpuCompatibilityModeSetting == 1, isSpecific);
+    EmulatorSettings.SetNullGPU(gpuCompatibilityModeSetting == 2, isSpecific);
     EmulatorSettings.SetWindowHeight(windowHeightSetting, isSpecific);
     EmulatorSettings.SetWindowWidth(windowWidthSetting, isSpecific);
     EmulatorSettings.SetHdrAllowed(hdrAllowedSetting, isSpecific);
@@ -690,6 +696,8 @@ void SettingsWindow::DrawSettingsTable(SettingsCategory category) {
 
             AddSettingCombo("Display Mode", fullscreenModeSetting, fullscreenModeOptions);
             AddSettingCombo("Present Mode", presentModeSetting, presentModeOptions);
+            AddSettingCombo("GPU Compatibility Mode (Requires Restart)",
+                            gpuCompatibilityModeSetting, gpuCompatibilityModeOptions);
             AddSettingSliderInt("Window Width", windowWidthSetting, 0, 8000);
             AddSettingSliderInt("Window Height", windowHeightSetting, 0, 7000);
             AddSettingCheckbox("Enable HDR", hdrAllowedSetting);
