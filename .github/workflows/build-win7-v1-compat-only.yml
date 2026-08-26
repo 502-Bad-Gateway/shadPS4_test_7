@@ -1,4 +1,4 @@
-name: Build shadPS4 Win7 V1 guest Vulkan 1.2
+name: Build shadPS4 Win7 V1 pipeline forensics
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 guest Vulkan 1.2 target
+    name: Build Windows 7 x64 pipeline-forensics target
     runs-on: windows-2022
     timeout-minutes: 120
 
@@ -162,20 +162,42 @@ jobs:
           $stringsTool = Join-Path $env:LLVM_MINGW_ROOT 'bin/llvm-strings.exe'
           $strings = (& $stringsTool (Join-Path $output 'shadps4.exe') | Out-String)
           foreach ($required in @('Windows 7 compatibility-only settings active',
-                                  'Windows 7 Vulkan 1.2 compatibility active')) {
+                                  'Windows 7 Vulkan 1.2 compatibility active',
+                                  'Win7 pipeline forensics enabled',
+                                  'Win7 pipeline forensics START',
+                                  'Win7 pipeline forensics SUCCESS')) {
               if (!$strings.Contains($required)) { throw "Required marker missing: $required" }
           }
           foreach ($forbidden in @('Windows 7 NVIDIA sampler workaround',
                                    'Win7 graphics pipeline state',
-                                   'Win7 graphics descriptor layout')) {
+                                   'Win7 graphics descriptor layout',
+                                   'using static vertex input',
+                                   'normalizing mixed attachment sample counts',
+                                   'disabling graphics pipeline optimization')) {
               if ($strings.Contains($forbidden)) { throw "GPU/Vulkan experiment leaked: $forbidden" }
           }
 
           @"
+          shadPS4 Windows 7 pipeline-forensics diagnostic build
+
+          This build restores normal renderer behavior after the completed experimental axes.
+          It records each legacy NVIDIA Vulkan 1.2 graphics-pipeline creation attempt under:
+
+            user\shader\pipeline_forensics\run_*\
+
+          For the minimal diagnostic test, run Bloodborne once and We Are Doomed once with
+          null_gpu=false. Return both the normal test-results archive and the complete
+          user\shader\pipeline_forensics folder. A pipeline report with status=started but no
+          later status=success identifies the call where the driver stopped.
+          "@ | Out-File -Encoding ascii (Join-Path $output 'PIPELINE-FORENSICS-README.txt')
+
+          @"
           lineage=clean-upstream-7fb1a530
           upstream_commit=7fb1a530c15415097836521fec6f3483e27c81ae
-          phase=windows7-vulkan-compatibility-v1
-          single_axis=guest-vulkan12-renderpass-ext-dispatch
+          phase=windows7-vulkan-pipeline-diagnostics
+          single_axis=graphics-pipeline-forensics-capture
+          renderer_behavior_change=false
+          previous_pipeline_optimization_experiment=reverted
           emulator_toolchain=clang-cl-msvc-ucrt
           emulator_target=x86_64-pc-windows-msvc
           launcher_toolchain=llvm-mingw-20260616-msvcrt-x86_64-static
@@ -195,10 +217,10 @@ jobs:
               } | Sort-Object)
           $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
 
-      - name: Upload Windows 7 V1 guest Vulkan 1.2 artifact
+      - name: Upload Windows 7 V1 pipeline-forensics artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shadps4-win7-v1-guest-vulkan12-${{ github.sha }}
+          name: shadps4-win7-v1-pipeline-forensics-${{ github.sha }}
           path: artifact/
           if-no-files-found: error
           retention-days: 30

@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <filesystem>
+#include <string>
+
 #include <boost/container/static_vector.hpp>
 #include <xxhash.h>
 
@@ -71,6 +74,13 @@ struct GraphicsPipelineKey {
     bool Deserialize(Serialization::Archive& ar);
 };
 
+struct GraphicsPipelineForensics {
+    u64 sequence{};
+    u64 pipeline_hash{};
+    std::filesystem::path run_directory{};
+    std::array<std::string, MaxShaderStages> shader_files{};
+};
+
 class GraphicsPipeline : public Pipeline {
 public:
     struct SerializationSupport {
@@ -93,7 +103,7 @@ public:
                      std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos,
                      std::optional<const Shader::Gcn::FetchShaderData> fetch_shader,
                      std::span<const vk::ShaderModule> modules, SerializationSupport& sdata,
-                     bool preloading);
+                     bool preloading, const GraphicsPipelineForensics& forensics);
     ~GraphicsPipeline();
 
     const std::optional<const Shader::Gcn::FetchShaderData>& GetFetchShader() const noexcept {
@@ -126,6 +136,8 @@ private:
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     LegacyRenderPassKey legacy_render_pass_key{};
 #endif
+    GraphicsPipelineForensics pipeline_forensics{};
+    std::string pipeline_forensics_descriptor_state{};
 };
 
 struct ClipDistanceShaderKey {

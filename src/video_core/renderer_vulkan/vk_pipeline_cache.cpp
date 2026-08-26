@@ -3,6 +3,8 @@
 
 #include <ranges>
 
+#include <xxhash.h>
+
 #include "common/hash.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -312,6 +314,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .needs_clip_distance_emulation = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
         .supports_shader_stencil_export = instance_.IsShaderStencilExportSupported(),
     };
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    InitializePipelineForensics();
+#endif
     WarmUp();
 
     auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
@@ -321,6 +326,95 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
 }
 
 PipelineCache::~PipelineCache() = default;
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+void PipelineCache::InitializePipelineForensics() {
+    if (instance.GetDriverID() != vk::DriverId::eNvidiaProprietary ||
+        instance.ApiVersion() >= VK_API_VERSION_1_3) {
+        return;
+    }
+
+    using namespace Common::FS;
+    const auto root_directory = GetUserPath(PathType::ShaderDir) / "pipeline_forensics";
+    const std::string run_stem = "run";
+    std::error_code error;
+    for (u32 attempt = 0; attempt < 1000; ++attempt) {
+        const auto directory_name =
+            attempt == 0 ? run_stem : fmt::format("{}_{:03}", run_stem, attempt);
+        const auto candidate = root_directory / directory_name;
+        if (!std::filesystem::exists(candidate, error) && !error) {
+            std::filesystem::create_directories(candidate / "modules", error);
+            if (!error) {
+                pipeline_forensics_run_directory = candidate;
+            }
+            break;
+        }
+        error.clear();
+    }
+    if (pipeline_forensics_run_directory.empty()) {
+        LOG_ERROR(Render_Vulkan, "Win7 pipeline forensics could not create {}: {}",
+                  PathToUTF8String(root_directory), error.message());
+        return;
+    }
+
+    const auto readme_path = pipeline_forensics_run_directory / "README.txt";
+    const auto readme = fmt::format(
+        "shadPS4 Windows 7 pipeline-forensics capture\n"
+        "Each pipeline_<id>_<hash>.txt begins with status=started.\n"
+        "A status=success line is appended only if vkCreateGraphicsPipelines returns success.\n"
+        "Validate every modules/*.spv file with: spirv-val --target-env vulkan1.2 <file>\n"
+        "Vulkan API: {}.{}.{}\n",
+        VK_VERSION_MAJOR(instance.ApiVersion()), VK_VERSION_MINOR(instance.ApiVersion()),
+        VK_VERSION_PATCH(instance.ApiVersion()));
+    const IOFile readme_file{readme_path, FileAccessMode::Create, FileType::TextFile};
+    readme_file.WriteString(readme);
+
+    LOG_WARNING(Render_Vulkan, "Win7 pipeline forensics enabled: output={}",
+                PathToUTF8String(pipeline_forensics_run_directory));
+}
+
+void PipelineCache::RegisterPipelineForensicsShader(vk::ShaderModule module,
+                                                     std::span<const u32> code,
+                                                     const Shader::Info& info, size_t perm_idx) {
+    if (pipeline_forensics_run_directory.empty() || !module || code.empty()) {
+        return;
+    }
+
+    const u64 spv_hash = XXH3_64bits(code.data(), code.size_bytes());
+    const auto filename = fmt::format("{}_{:016x}_{}_spv_{:016x}.spv", info.stage, info.pgm_hash,
+                                      perm_idx, spv_hash);
+    const auto relative_path = std::filesystem::path{"modules"} / filename;
+    const auto full_path = pipeline_forensics_run_directory / relative_path;
+    const IOFile file{full_path, FileAccessMode::Create};
+    if (file.WriteSpan(code) != code.size()) {
+        LOG_ERROR(Render_Vulkan, "Win7 pipeline forensics failed to write shader {}",
+                  PathToUTF8String(full_path));
+        return;
+    }
+    pipeline_forensics_shader_files[module] = PathToUTF8String(relative_path);
+}
+
+GraphicsPipelineForensics PipelineCache::BuildPipelineForensics(const u64 pipeline_hash) {
+    GraphicsPipelineForensics forensics{};
+    if (pipeline_forensics_run_directory.empty()) {
+        return forensics;
+    }
+
+    forensics.sequence = pipeline_forensics_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    forensics.pipeline_hash = pipeline_hash;
+    forensics.run_directory = pipeline_forensics_run_directory;
+    for (u32 index = 0; index < MaxShaderStages; ++index) {
+        if (!modules[index]) {
+            continue;
+        }
+        if (const auto file = pipeline_forensics_shader_files.find(modules[index]);
+            file != pipeline_forensics_shader_files.end()) {
+            forensics.shader_files[index] = file->second;
+        }
+    }
+    return forensics;
+}
+#endif
 
 const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
     if (!RefreshGraphicsKey()) {
@@ -332,9 +426,13 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
         LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
 
         GraphicsPipeline::SerializationSupport sdata{};
+        GraphicsPipelineForensics forensics{};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        forensics = BuildPipelineForensics(pipeline_hash);
+#endif
         it.value() = std::make_unique<GraphicsPipeline>(
             instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache, infos,
-            runtime_infos, fetch_shader, modules, sdata, false);
+            runtime_infos, fetch_shader, modules, sdata, false, forensics);
 
         RegisterPipelineData(graphics_key, pipeline_hash, sdata);
         ++num_new_pipelines;
@@ -616,12 +714,19 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
 
     auto patch = GetShaderPatch(info.pgm_hash, info.stage, perm_idx, "spv");
     const bool is_patched = patch && EmulatorSettings.IsPatchShaders();
+    const std::span<const u32> final_spv =
+        is_patched ? std::span<const u32>{patch->data(), patch->size()}
+                   : std::span<const u32>{spv.data(), spv.size()};
     if (is_patched) {
         LOG_INFO(Loader, "Loaded patch for {} shader {:#x}", info.stage, info.pgm_hash);
-        module = CompileSPV(*patch, instance.GetDevice());
+        module = CompileSPV(final_spv, instance.GetDevice());
     } else {
-        module = CompileSPV(spv, instance.GetDevice());
+        module = CompileSPV(final_spv, instance.GetDevice());
     }
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    RegisterPipelineForensicsShader(module, final_spv, info, perm_idx);
+#endif
 
     RegisterShaderBinary(std::move(spv), info.pgm_hash, perm_idx);
 

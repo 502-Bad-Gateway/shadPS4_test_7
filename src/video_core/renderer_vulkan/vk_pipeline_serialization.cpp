@@ -237,9 +237,14 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
     ASSERT(is_new);
 
+    const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+    GraphicsPipelineForensics forensics{};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    forensics = BuildPipelineForensics(pipeline_hash);
+#endif
     it.value() = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache, infos,
-        runtime_infos, fetch_shader, modules, sdata, true);
+        runtime_infos, fetch_shader, modules, sdata, true, forensics);
 
     infos.fill(nullptr);
     modules.fill(nullptr);
@@ -294,6 +299,10 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
         }
     }
     it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    RegisterPipelineForensicsShader(module, spv, it_pgm.value()->info, perm_idx);
+#endif
 
     infos[stage] = &it_pgm.value()->info;
     modules[stage] = module;

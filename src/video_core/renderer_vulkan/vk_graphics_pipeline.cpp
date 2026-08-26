@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <string_view>
 #include <utility>
 #include <boost/container/small_vector.hpp>
 
 #include "common/assert.h"
+#include "common/io_file.h"
+#include "common/path_util.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_discard_frag.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_quad_rect.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -27,15 +30,40 @@ static constexpr std::array LogicalStageToStageBit = {
     vk::ShaderStageFlagBits::eCompute,
 };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+static std::string DumpPipelineForensicsAuxShader(const GraphicsPipelineForensics& forensics,
+                                                  std::span<const u32> code,
+                                                  std::string_view name) {
+    if (forensics.sequence == 0 || forensics.run_directory.empty() || code.empty()) {
+        return {};
+    }
+
+    using namespace Common::FS;
+    const u64 spv_hash = XXH3_64bits(code.data(), code.size_bytes());
+    const auto filename = fmt::format("pipeline_{:06}_{}_spv_{:016x}.spv", forensics.sequence,
+                                      name, spv_hash);
+    const auto relative_path = std::filesystem::path{"modules"} / filename;
+    const auto full_path = forensics.run_directory / relative_path;
+    const IOFile file{full_path, FileAccessMode::Create};
+    if (file.WriteSpan(code) != code.size()) {
+        LOG_ERROR(Render_Vulkan, "Win7 pipeline forensics failed to write auxiliary shader {}",
+                  PathToUTF8String(full_path));
+        return {};
+    }
+    return PathToUTF8String(relative_path);
+}
+#endif
+
 GraphicsPipeline::GraphicsPipeline(
     const Instance& instance, Scheduler& scheduler, DescriptorHeap& desc_heap,
     const Shader::Profile& profile, const GraphicsPipelineKey& key_,
     vk::PipelineCache pipeline_cache, std::span<const Shader::Info*, MaxShaderStages> infos,
     std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos,
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader_,
-    std::span<const vk::ShaderModule> modules, SerializationSupport& sdata, bool preloading)
+    std::span<const vk::ShaderModule> modules, SerializationSupport& sdata, bool preloading,
+    const GraphicsPipelineForensics& forensics)
     : Pipeline{instance, scheduler, desc_heap, profile, pipeline_cache}, key{key_},
-      fetch_shader{std::move(fetch_shader_)} {
+      fetch_shader{std::move(fetch_shader_)}, pipeline_forensics{forensics} {
     const vk::Device device = instance.GetDevice();
     std::ranges::copy(infos, stages.begin());
     BuildDescSetLayout(preloading);
@@ -197,6 +225,12 @@ GraphicsPipeline::GraphicsPipeline(
         .pDynamicStates = dynamic_states.data(),
     };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    std::string auxiliary_tcs_file;
+    std::string auxiliary_tes_file;
+    std::string auxiliary_fragment_file;
+#endif
+
     boost::container::static_vector<vk::PipelineShaderStageCreateInfo, MaxShaderStages>
         shader_stages;
     auto stage = u32(Shader::LogicalStage::Vertex);
@@ -228,6 +262,10 @@ GraphicsPipeline::GraphicsPipeline(
             const auto& fs_info = runtime_infos[u32(Shader::LogicalStage::Fragment)].fs_info;
             sdata.tcs = Shader::Backend::SPIRV::EmitAuxilaryTessShader(type, fs_info);
         }
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        auxiliary_tcs_file =
+            DumpPipelineForensicsAuxShader(pipeline_forensics, sdata.tcs, "aux_tcs");
+#endif
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eTessellationControl,
             .module = CompileSPV(sdata.tcs, instance.GetDevice()),
@@ -247,6 +285,10 @@ GraphicsPipeline::GraphicsPipeline(
             sdata.tes = Shader::Backend::SPIRV::EmitAuxilaryTessShader(
                 AuxShaderType::PassthroughTES, fs_info);
         }
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        auxiliary_tes_file =
+            DumpPipelineForensicsAuxShader(pipeline_forensics, sdata.tes, "aux_tes");
+#endif
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eTessellationEvaluation,
             .module = CompileSPV(sdata.tes, instance.GetDevice()),
@@ -268,6 +310,10 @@ GraphicsPipeline::GraphicsPipeline(
             sdata.fragment =
                 Shader::Backend::SPIRV::EmitDiscardFragmentShader(vs_runtime_info.outputs);
         }
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        auxiliary_fragment_file = DumpPipelineForensicsAuxShader(
+            pipeline_forensics, sdata.fragment, "aux_fragment");
+#endif
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eFragment,
             .module = CompileSPV(sdata.fragment, instance.GetDevice()),
@@ -415,21 +461,9 @@ GraphicsPipeline::GraphicsPipeline(
     // In practice, we use dynamic state for all of it.
     constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
 
-#ifdef SHADPS4_WINDOWS_7_COMPAT
-    vk::PipelineCreateFlags pipeline_flags{};
-    if (instance.GetDriverID() == vk::DriverId::eNvidiaProprietary &&
-        instance.ApiVersion() < VK_API_VERSION_1_3) {
-        pipeline_flags |= vk::PipelineCreateFlagBits::eDisableOptimization;
-        LOG_WARNING(Render_Vulkan,
-                    "Legacy NVIDIA Vulkan 1.2 experiment: disabling graphics pipeline "
-                    "optimization");
-    }
-#endif
-
     const vk::GraphicsPipelineCreateInfo pipeline_info = {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
         .pNext = nullptr,
-        .flags = pipeline_flags,
 #else
         .pNext = &pipeline_rendering_ci,
 #endif
@@ -451,8 +485,177 @@ GraphicsPipeline::GraphicsPipeline(
 #endif
     };
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    std::filesystem::path pipeline_forensics_report_path;
+    if (pipeline_forensics.sequence != 0 && !pipeline_forensics.run_directory.empty()) {
+        using namespace Common::FS;
+        const auto report_stem =
+            fmt::format("pipeline_{:06}_{:016x}", pipeline_forensics.sequence,
+                        pipeline_forensics.pipeline_hash);
+        pipeline_forensics_report_path = pipeline_forensics.run_directory / (report_stem + ".txt");
+        const auto key_path = pipeline_forensics.run_directory / (report_stem + ".key.bin");
+
+        std::string report;
+        report += "format_version=1\nstatus=started\n";
+        report += fmt::format("pipeline_id={}\npipeline_hash=0x{:016x}\npreloading={}\n",
+                              pipeline_forensics.sequence, pipeline_forensics.pipeline_hash,
+                              preloading);
+        report += fmt::format("vulkan_api={}.{}.{}\ndriver_id={}\nsupported_spirv=0x{:08x}\n",
+                              VK_VERSION_MAJOR(instance.ApiVersion()),
+                              VK_VERSION_MINOR(instance.ApiVersion()),
+                              VK_VERSION_PATCH(instance.ApiVersion()),
+                              vk::to_string(instance.GetDriverID()), profile.supported_spirv);
+        report += fmt::format(
+            "pipeline_cache_present={}\npipeline_create_flags=0\nlegacy_render_pass=true\n"
+            "stage_count={}\n",
+            bool(pipeline_cache), shader_stages.size());
+
+        for (u32 index = 0; index < MaxShaderStages; ++index) {
+            if (!infos[index]) {
+                continue;
+            }
+            report += fmt::format(
+                "stage[{}].guest_stage={}\nstage[{}].logical_stage={}\n"
+                "stage[{}].program_hash=0x{:016x}\nstage[{}].permutation_hash=0x{:016x}\n"
+                "stage[{}].spv_file={}\n",
+                index, infos[index]->stage, index, index, index, infos[index]->pgm_hash, index,
+                static_cast<u64>(key.stage_hashes[index]), index,
+                pipeline_forensics.shader_files[index].empty()
+                    ? std::string_view{"<not-captured>"}
+                    : std::string_view{pipeline_forensics.shader_files[index]});
+        }
+        for (u32 index = 0; index < shader_stages.size(); ++index) {
+            report += fmt::format("pipeline_stage[{}]={}\n", index,
+                                  vk::to_string(shader_stages[index].stage));
+        }
+        if (!auxiliary_tcs_file.empty()) {
+            report += fmt::format("aux_tcs_spv_file={}\n", auxiliary_tcs_file);
+        }
+        if (!auxiliary_tes_file.empty()) {
+            report += fmt::format("aux_tes_spv_file={}\n", auxiliary_tes_file);
+        }
+        if (!auxiliary_fragment_file.empty()) {
+            report += fmt::format("aux_fragment_spv_file={}\n", auxiliary_fragment_file);
+        }
+
+        report += pipeline_forensics_descriptor_state;
+        report += fmt::format(
+            "topology={}\nprimitive_type={}\npatch_control_points={}\n"
+            "depth_clamp_enable={}\ndepth_clip_enable={}\npolygon_mode={}\n"
+            "provoking_vertex_last={}\nvertex_input_dynamic={}\n"
+            "extended_dynamic_state3={}\ndynamic_color_write_mask={}\n"
+            "mixed_any_samples={}\nmixed_depth_samples={}\n",
+            vk::to_string(topology), static_cast<u32>(key.prim_type),
+            tessellation_state.patchControlPoints, raster_chain.get().depthClampEnable,
+            key.depth_clip_enable, vk::to_string(raster_chain.get().polygonMode),
+            static_cast<u32>(key.provoking_vtx_last), instance.IsVertexInputDynamicState(),
+            instance.IsExtendedDynamicState3Supported(),
+            instance.IsDynamicColorWriteMaskSupported(), instance.IsMixedAnySamplesSupported(),
+            instance.IsMixedDepthSamplesSupported());
+
+        report += fmt::format("vertex_attribute_count={}\nvertex_binding_count={}\n"
+                              "vertex_divisor_count={}\n",
+                              sdata.vertex_attributes.size(), sdata.vertex_bindings.size(),
+                              sdata.divisors.size());
+        for (u32 index = 0; index < sdata.vertex_attributes.size(); ++index) {
+            const auto& attribute = sdata.vertex_attributes[index];
+            report += fmt::format(
+                "vertex_attribute[{}]=location:{},binding:{},format:{},offset:{}\n", index,
+                attribute.location, attribute.binding, vk::to_string(attribute.format),
+                attribute.offset);
+        }
+        for (u32 index = 0; index < sdata.vertex_bindings.size(); ++index) {
+            const auto& binding = sdata.vertex_bindings[index];
+            report += fmt::format("vertex_binding[{}]=binding:{},stride:{},input_rate:{}\n", index,
+                                  binding.binding, binding.stride,
+                                  vk::to_string(binding.inputRate));
+        }
+        for (u32 index = 0; index < sdata.divisors.size(); ++index) {
+            const auto& divisor = sdata.divisors[index];
+            report += fmt::format("vertex_divisor[{}]=binding:{},divisor:{}\n", index,
+                                  divisor.binding, divisor.divisor);
+        }
+
+        report += fmt::format(
+            "rasterization_samples={}\nsample_shading_enable={}\nmin_sample_shading={}\n"
+            "alpha_to_coverage_enable={}\nalpha_to_one_enable={}\n"
+            "color_attachment_count={}\nmrt_mask=0x{:x}\n",
+            vk::to_string(sdata.multisampling.rasterizationSamples),
+            bool(sdata.multisampling.sampleShadingEnable), sdata.multisampling.minSampleShading,
+            bool(sdata.multisampling.alphaToCoverageEnable),
+            bool(sdata.multisampling.alphaToOneEnable), key.num_color_attachments, key.mrt_mask);
+        for (u32 index = 0; index < key.num_color_attachments; ++index) {
+            const auto& attachment = attachments[index];
+            report += fmt::format(
+                "color[{}].active={}\ncolor[{}].format={}\ncolor[{}].samples={}\n"
+                "color[{}].write_mask=0x{:x}\ncolor[{}].blend_enable={}\n"
+                "color[{}].src_color={}\ncolor[{}].dst_color={}\ncolor[{}].color_op={}\n"
+                "color[{}].src_alpha={}\ncolor[{}].dst_alpha={}\ncolor[{}].alpha_op={}\n",
+                index, bool(key.mrt_mask & (1U << index)), index,
+                vk::to_string(legacy_render_pass_key.color_formats[index]), index,
+                vk::to_string(legacy_render_pass_key.color_samples[index]), index,
+                static_cast<VkColorComponentFlags>(attachment.colorWriteMask), index,
+                bool(attachment.blendEnable), index, vk::to_string(attachment.srcColorBlendFactor),
+                index, vk::to_string(attachment.dstColorBlendFactor), index,
+                vk::to_string(attachment.colorBlendOp), index,
+                vk::to_string(attachment.srcAlphaBlendFactor), index,
+                vk::to_string(attachment.dstAlphaBlendFactor), index,
+                vk::to_string(attachment.alphaBlendOp));
+        }
+        report += fmt::format(
+            "depth_format={}\ndepth_samples={}\ndepth_layout={}\nhas_depth={}\n"
+            "has_stencil={}\ndepth_stencil_state_present={}\nlogic_op_enable={}\nlogic_op={}\n"
+            "dynamic_state_count={}\n",
+            vk::to_string(legacy_render_pass_key.depth_format),
+            vk::to_string(legacy_render_pass_key.depth_samples),
+            vk::to_string(legacy_render_pass_key.depth_layout), legacy_render_pass_key.has_depth,
+            legacy_render_pass_key.has_stencil, pipeline_info.pDepthStencilState != nullptr,
+            bool(color_blending.logicOpEnable), vk::to_string(color_blending.logicOp),
+            dynamic_states.size());
+        for (u32 index = 0; index < dynamic_states.size(); ++index) {
+            report += fmt::format("dynamic_state[{}]={}\n", index,
+                                  vk::to_string(dynamic_states[index]));
+        }
+        report += fmt::format("raw_pipeline_key_file={}\n",
+                              PathToUTF8String(key_path.filename()));
+
+        const IOFile key_file{key_path, FileAccessMode::Create};
+        if (key_file.IsOpen()) {
+            key_file.WriteRaw<u8>(&key, sizeof(key));
+        }
+        const IOFile report_file{pipeline_forensics_report_path, FileAccessMode::Create,
+                                 FileType::TextFile};
+        report_file.WriteString(report);
+        LOG_WARNING(Render_Vulkan,
+                    "Win7 pipeline forensics START id={} hash=0x{:016x} report={}",
+                    pipeline_forensics.sequence, pipeline_forensics.pipeline_hash,
+                    PathToUTF8String(pipeline_forensics_report_path));
+    }
+#endif
+
     auto [pipeline_result, pipe] =
         device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    if (!pipeline_forensics_report_path.empty()) {
+        using namespace Common::FS;
+        const bool succeeded = pipeline_result == vk::Result::eSuccess;
+        const auto completion = fmt::format("status={}\nvk_result={}\n",
+                                            succeeded ? "success" : "returned_error",
+                                            vk::to_string(pipeline_result));
+        const IOFile report_file{pipeline_forensics_report_path, FileAccessMode::Append,
+                                 FileType::TextFile};
+        report_file.WriteString(completion);
+        if (succeeded) {
+            LOG_WARNING(Render_Vulkan, "Win7 pipeline forensics SUCCESS id={} hash=0x{:016x}",
+                        pipeline_forensics.sequence, pipeline_forensics.pipeline_hash);
+        } else {
+            LOG_ERROR(Render_Vulkan,
+                      "Win7 pipeline forensics RETURNED_ERROR id={} hash=0x{:016x} result={}",
+                      pipeline_forensics.sequence, pipeline_forensics.pipeline_hash,
+                      vk::to_string(pipeline_result));
+        }
+    }
+#endif
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
                vk::to_string(pipeline_result));
     pipeline = std::move(pipe);
@@ -557,6 +760,21 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
     const auto flags = uses_push_descriptors
                            ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
                            : vk::DescriptorSetLayoutCreateFlagBits{};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    if (pipeline_forensics.sequence != 0) {
+        pipeline_forensics_descriptor_state =
+            fmt::format("descriptor_binding_count={}\nuses_push_descriptors={}\n"
+                        "max_push_descriptors={}\n",
+                        bindings.size(), uses_push_descriptors, instance.MaxPushDescriptors());
+        for (u32 index = 0; index < bindings.size(); ++index) {
+            const auto& descriptor = bindings[index];
+            pipeline_forensics_descriptor_state += fmt::format(
+                "descriptor[{}]=binding:{},type:{},count:{},stages:{}\n", index,
+                descriptor.binding, vk::to_string(descriptor.descriptorType),
+                descriptor.descriptorCount, vk::to_string(descriptor.stageFlags));
+        }
+    }
+#endif
     const vk::DescriptorSetLayoutCreateInfo desc_layout_ci = {
         .flags = flags,
         .bindingCount = static_cast<u32>(bindings.size()),

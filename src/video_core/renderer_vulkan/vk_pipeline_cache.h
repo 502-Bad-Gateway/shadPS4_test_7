@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <atomic>
+#include <filesystem>
+#include <string>
 #include <variant>
 #include <tsl/robin_map.h>
 #include "shader_recompiler/profile.h"
@@ -109,6 +112,13 @@ private:
                                    Shader::Backend::Bindings& binding);
     const Shader::RuntimeInfo& BuildRuntimeInfo(Shader::Stage stage, Shader::LogicalStage l_stage);
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    void InitializePipelineForensics();
+    void RegisterPipelineForensicsShader(vk::ShaderModule module, std::span<const u32> code,
+                                         const Shader::Info& info, size_t perm_idx);
+    [[nodiscard]] GraphicsPipelineForensics BuildPipelineForensics(u64 pipeline_hash);
+#endif
+
     [[nodiscard]] bool IsPipelineCacheDirty() const {
         return num_new_pipelines > 0;
     }
@@ -132,6 +142,12 @@ private:
     GraphicsPipelineKey graphics_key{};
     ComputePipelineKey compute_key{};
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    std::atomic<u64> pipeline_forensics_sequence{};
+    std::filesystem::path pipeline_forensics_run_directory{};
+    tsl::robin_map<vk::ShaderModule, std::string> pipeline_forensics_shader_files{};
+#endif
 
     // Only if Config::collectShadersForDebug()
     tsl::robin_map<vk::ShaderModule,
