@@ -415,9 +415,21 @@ GraphicsPipeline::GraphicsPipeline(
     // In practice, we use dynamic state for all of it.
     constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    vk::PipelineCreateFlags pipeline_flags{};
+    if (instance.GetDriverID() == vk::DriverId::eNvidiaProprietary &&
+        instance.ApiVersion() < VK_API_VERSION_1_3) {
+        pipeline_flags |= vk::PipelineCreateFlagBits::eDisableOptimization;
+        LOG_WARNING(Render_Vulkan,
+                    "Legacy NVIDIA Vulkan 1.2 experiment: disabling graphics pipeline "
+                    "optimization");
+    }
+#endif
+
     const vk::GraphicsPipelineCreateInfo pipeline_info = {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
         .pNext = nullptr,
+        .flags = pipeline_flags,
 #else
         .pNext = &pipeline_rendering_ci,
 #endif

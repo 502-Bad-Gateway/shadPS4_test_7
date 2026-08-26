@@ -486,23 +486,7 @@ bool Instance::CreateDevice() {
     custom_border_color = add_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
     depth_clip_control = add_extension(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME);
     depth_clip_enable = add_extension(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
-#ifdef SHADPS4_WINDOWS_7_COMPAT
-    const bool quarantine_nv_dynamic_vertex_input =
-        driver_id == vk::DriverId::eNvidiaProprietary &&
-        properties.apiVersion < VK_API_VERSION_1_3;
-    if (quarantine_nv_dynamic_vertex_input) {
-        LOG_WARNING(Render_Vulkan,
-                    "Legacy NVIDIA Vulkan 1.2 experiment: disabling {} and using static vertex "
-                    "input",
-                    VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
-        vertex_input_dynamic_state = false;
-    } else {
-        vertex_input_dynamic_state =
-            add_extension(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
-    }
-#else
     vertex_input_dynamic_state = add_extension(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
-#endif
     list_restart = add_extension(VK_EXT_PRIMITIVE_TOPOLOGY_LIST_RESTART_EXTENSION_NAME);
     if (list_restart) {
         list_restart_features =
