@@ -18,7 +18,7 @@ permissions:
 env:
   EXPERIMENT_ITERATION: "02"
   EXPERIMENT_NAME: "first-graphics"
-  ARTIFACT_BRANCH: "shadps4"
+  ARTIFACT_BRANCH: "shadps4_clone"
 
 jobs:
   build-win7-x64:
