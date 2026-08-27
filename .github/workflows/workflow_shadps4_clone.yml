@@ -87,7 +87,7 @@ jobs:
           try {
               & $rc -I . launcher.rc -O coff -o $res
               if ($LASTEXITCODE -ne 0) { throw 'launcher resource compilation failed' }
-              & $cxx -std=c++17 -O2 -DNDEBUG -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -I . main.cpp $res -o $exe -mwindows -municode -static -fuse-ld=lld -Wl,--subsystem,windows:6.01 -Wl,--disable-high-entropy-va -lcomctl32 -lcomdlg32 -lshell32 -lgdi32 -lole32 -luuid
+              & $cxx '-std=c++17' '-O2' '-DNDEBUG' '-DUNICODE' '-D_UNICODE' '-D_WIN32_WINNT=0x0601' '-DWINVER=0x0601' '-I' '.' 'main.cpp' $res '-o' $exe '-mwindows' '-municode' '-static' '-fuse-ld=lld' '-Wl,--subsystem,windows:6.01' '-Wl,--disable-high-entropy-va' '-lcomctl32' '-lcomdlg32' '-lshell32' '-lgdi32' '-lole32' '-luuid'
               if ($LASTEXITCODE -ne 0) { throw 'launcher build failed' }
           } finally {
               Pop-Location
