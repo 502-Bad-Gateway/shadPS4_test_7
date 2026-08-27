@@ -72,13 +72,50 @@ void Rasterizer::LogSafeGpuSummary() const {
     const u64 transfers_allowed = safe_gpu_stats.fills_allowed + safe_gpu_stats.copies_allowed;
     const u64 transfers_skipped = safe_gpu_stats.fills_skipped + safe_gpu_stats.copies_skipped;
     LOG_INFO(Render_Vulkan,
-             "SafeGPU summary: graphics skipped={}, compute skipped={}, transfers allowed={} "
-             "(fills={}, copies={}), transfers skipped={} (fills={}, copies={}), "
-             "guest cp-sync skipped={}, image downloads skipped={}",
-             safe_gpu_stats.graphics_skipped, safe_gpu_stats.compute_skipped, transfers_allowed,
-             safe_gpu_stats.fills_allowed, safe_gpu_stats.copies_allowed, transfers_skipped,
-             safe_gpu_stats.fills_skipped, safe_gpu_stats.copies_skipped,
+             "SafeGPU summary: graphics skipped={}, pipelines allowed={}, pipelines skipped={}, "
+             "compute skipped={}, transfers allowed={} (fills={}, copies={}), transfers skipped={} "
+             "(fills={}, copies={}), guest cp-sync skipped={}, image downloads skipped={}",
+             safe_gpu_stats.graphics_skipped, safe_gpu_stats.graphics_pipelines_allowed,
+             safe_gpu_stats.graphics_pipelines_skipped, safe_gpu_stats.compute_skipped,
+             transfers_allowed, safe_gpu_stats.fills_allowed, safe_gpu_stats.copies_allowed,
+             transfers_skipped, safe_gpu_stats.fills_skipped, safe_gpu_stats.copies_skipped,
              safe_gpu_stats.cp_sync_skipped, safe_gpu_stats.image_downloads_skipped);
+}
+
+bool Rasterizer::IsSafeGpuGraphicsPipeline(const GraphicsPipeline* pipeline) const {
+    const auto stages = pipeline->GetStages();
+    const auto get_stage = [&stages](const Shader::LogicalStage stage) {
+        return stages[static_cast<u32>(stage)];
+    };
+    const auto* vs = get_stage(Shader::LogicalStage::Vertex);
+    const auto* fs = get_stage(Shader::LogicalStage::Fragment);
+    const auto* tcs = get_stage(Shader::LogicalStage::TessellationControl);
+    const auto* tes = get_stage(Shader::LogicalStage::TessellationEval);
+    const auto* gs = get_stage(Shader::LogicalStage::Geometry);
+    const auto& key = pipeline->GetGraphicsKey();
+
+    bool has_blending = false;
+    for (u32 index = 0; index < key.num_color_attachments; ++index) {
+        has_blending |= key.blend_controls[index].enable != 0;
+    }
+
+    const VideoCore::SafeGpuGraphicsPipelineInfo info{
+        .has_vertex_shader = vs != nullptr,
+        .has_fragment_shader = fs != nullptr,
+        .has_tessellation_shader = tcs != nullptr || tes != nullptr,
+        .has_geometry_shader = gs != nullptr,
+        .has_storage_images = (vs && vs->has_storage_images) || (fs && fs->has_storage_images),
+        .has_depth_or_stencil =
+            liverpool->regs.depth_buffer.DepthValid() ||
+            liverpool->regs.depth_buffer.StencilValid(),
+        .has_blending = has_blending,
+        .has_logic_op = key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,
+        .num_color_attachments = key.num_color_attachments,
+        .mrt_mask = key.mrt_mask,
+        .num_samples = key.num_samples,
+        .depth_samples = key.depth_samples,
+    };
+    return VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(info);
 }
 
 void Rasterizer::CpSync() {
@@ -254,6 +291,24 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     if (!pipeline) {
         return;
     }
+    if (safe_gpu_active && !IsSafeGpuGraphicsPipeline(pipeline)) {
+        const u64 count = ++safe_gpu_stats.graphics_pipelines_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP graphics pipeline hash={:#x} count={}",
+                     std::hash<GraphicsPipelineKey>{}(pipeline->GetGraphicsKey()), count);
+        }
+        return;
+    }
+    if (safe_gpu_active) {
+        const u64 count = ++safe_gpu_stats.graphics_pipelines_allowed;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} first-graphics allow-list "
+                     "count={}",
+                     std::hash<GraphicsPipelineKey>{}(pipeline->GetGraphicsKey()), count);
+        }
+    }
 
     PrepareRenderState(pipeline);
     if (!BindResources(pipeline)) {
@@ -311,6 +366,24 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     const GraphicsPipeline* pipeline = pipeline_cache.GetGraphicsPipeline();
     if (!pipeline) {
         return;
+    }
+    if (safe_gpu_active && !IsSafeGpuGraphicsPipeline(pipeline)) {
+        const u64 count = ++safe_gpu_stats.graphics_pipelines_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP graphics pipeline hash={:#x} count={}",
+                     std::hash<GraphicsPipelineKey>{}(pipeline->GetGraphicsKey()), count);
+        }
+        return;
+    }
+    if (safe_gpu_active) {
+        const u64 count = ++safe_gpu_stats.graphics_pipelines_allowed;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} first-graphics allow-list "
+                     "count={}",
+                     std::hash<GraphicsPipelineKey>{}(pipeline->GetGraphicsKey()), count);
+        }
     }
 
     PrepareRenderState(pipeline);

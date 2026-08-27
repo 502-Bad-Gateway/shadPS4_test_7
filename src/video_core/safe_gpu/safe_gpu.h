@@ -14,13 +14,27 @@ enum class EffectiveGpuMode {
     NullGPU,
 };
 
+struct SafeGpuGraphicsPipelineInfo {
+    bool has_vertex_shader{};
+    bool has_fragment_shader{};
+    bool has_tessellation_shader{};
+    bool has_geometry_shader{};
+    bool has_storage_images{};
+    bool has_depth_or_stencil{};
+    bool has_blending{};
+    bool has_logic_op{};
+    std::uint32_t num_color_attachments{};
+    std::uint32_t mrt_mask{};
+    std::uint32_t num_samples{};
+    std::uint32_t depth_samples{};
+};
+
 // Central fail-closed policy boundary for the experimental Windows 7 SafeGPU renderer.
-// Milestone 1 binds Liverpool but permits only explicitly validated buffer transfers;
-// graphics, compute, image work, and unknown operations remain skipped.
+// Milestone 2 permits only a conservative, explicitly classified graphics-pipeline subset.
 class SafeGpuGate final {
 public:
     static constexpr std::string_view PolicyVersion() noexcept {
-        return "milestone-1-transfer-only-v1";
+        return "milestone-2-first-graphics-v1";
     }
 
     static EffectiveGpuMode GetEffectiveMode() noexcept;
@@ -28,6 +42,7 @@ public:
     static bool IsEnabled() noexcept;
     static bool ShouldBindGuestRasterizer() noexcept;
     static bool ShouldAllowGraphics() noexcept;
+    static bool ShouldAllowGraphicsPipeline(const SafeGpuGraphicsPipelineInfo& info) noexcept;
     static bool ShouldAllowCompute() noexcept;
     static bool ShouldAllowGuestCpSync() noexcept;
     static bool ShouldWaitForGuestRewind() noexcept;

@@ -86,6 +86,8 @@ public:
 private:
     struct SafeGpuStats {
         u64 graphics_skipped{};
+        u64 graphics_pipelines_allowed{};
+        u64 graphics_pipelines_skipped{};
         u64 compute_skipped{};
         u64 fills_allowed{};
         u64 fills_skipped{};
@@ -97,6 +99,7 @@ private:
 
     static bool ShouldLogSafeGpuSample(u64 count) noexcept;
     void LogSafeGpuSummary() const;
+    bool IsSafeGpuGraphicsPipeline(const GraphicsPipeline* pipeline) const;
 
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);

@@ -64,3 +64,28 @@ TEST_F(SafeGpuPolicyTest, MilestoneOneTransferAllowListFailsClosed) {
     EXPECT_FALSE(
         VideoCore::SafeGpuGate::ShouldAllowSimpleBufferCopy(0x2000, 0x1000, 0, false, false));
 }
+
+TEST_F(SafeGpuPolicyTest, MilestoneTwoGraphicsAllowListFailsClosed) {
+    settings->SetNullGPU(false);
+    settings->SetSafeGPU(true);
+
+    VideoCore::SafeGpuGraphicsPipelineInfo basic{};
+    basic.has_vertex_shader = true;
+    basic.has_fragment_shader = true;
+    basic.num_color_attachments = 1;
+    basic.mrt_mask = 1;
+    basic.num_samples = 1;
+    basic.depth_samples = 1;
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+
+    basic.has_storage_images = true;
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    basic.has_storage_images = false;
+    basic.has_depth_or_stencil = true;
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+
+    settings->SetSafeGPU(false);
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    settings->SetNullGPU(true);
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+}

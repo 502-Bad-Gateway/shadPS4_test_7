@@ -51,6 +51,25 @@ bool SafeGpuGate::ShouldAllowGraphics() noexcept {
     return GetEffectiveMode() == EffectiveGpuMode::FullGPU;
 }
 
+bool SafeGpuGate::ShouldAllowGraphicsPipeline(
+    const SafeGpuGraphicsPipelineInfo& info) noexcept {
+    const auto mode = GetEffectiveMode();
+    if (mode == EffectiveGpuMode::FullGPU) {
+        return true;
+    }
+    if (mode != EffectiveGpuMode::SafeGPU) {
+        return false;
+    }
+
+    // First graphics experiment: allow only a basic vertex/fragment, single-target,
+    // single-sample color pipeline. Compute and complex attachment/shader paths remain
+    // outside this allow-list and therefore fail closed.
+    return info.has_vertex_shader && info.has_fragment_shader && !info.has_tessellation_shader &&
+           !info.has_geometry_shader && !info.has_storage_images && !info.has_depth_or_stencil &&
+           !info.has_blending && !info.has_logic_op && info.num_color_attachments == 1 &&
+           info.mrt_mask == 1 && info.num_samples == 1 && info.depth_samples == 1;
+}
+
 bool SafeGpuGate::ShouldAllowCompute() noexcept {
     return GetEffectiveMode() == EffectiveGpuMode::FullGPU;
 }
