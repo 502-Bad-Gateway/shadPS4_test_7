@@ -86,7 +86,13 @@ jobs:
               $updateText = $updateText.Replace(
                   $cmakeCommand,
                   $cmakeCommand + [Environment]::NewLine +
-                  "            '-DCMAKE_POLICY_VERSION_MINIMUM=3.5',")
+                  "            '-DCMAKE_POLICY_VERSION_MINIMUM=3.5'," +
+                  [Environment]::NewLine +
+                  "            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'," +
+                  [Environment]::NewLine +
+                  "            '-DCMAKE_C_FLAGS_RELEASE=/MT'," +
+                  [Environment]::NewLine +
+                  "            '-DCMAKE_CXX_FLAGS_RELEASE=/MT',")
               Set-Content -Encoding utf8 $updateDeps $updateText
               python scripts/update_deps.py --dir external --arch x64 --config release `
                 --generator Ninja --optional tests
