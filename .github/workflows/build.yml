@@ -4,17 +4,6 @@
 name: Build and Release
 
 on:
-  push:
-    branches-ignore: [Pre-release-shadPS4-*]
-    paths-ignore:
-      - "documents/**"
-      - "**/*.md"
-
-  pull_request:
-    paths-ignore:
-      - "documents/**"
-      - "**/*.md"
-
   workflow_dispatch:
 
 concurrency:
@@ -222,7 +211,7 @@ jobs:
       with:
         append-timestamp: false
         create-symlink: true
-        key: ${{env.cache-name}}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+        key: ${{env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
         variant: sccache
 
     - name: Print CPU Info
@@ -279,7 +268,7 @@ jobs:
           cache-name: ${{ runner.os }}-sdl-cache-cmake-build
       with:
         append-timestamp: false
-        key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+        key: ${{env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
 
     - name: Print CPU Info
       run: cat /proc/cpuinfo
@@ -338,7 +327,7 @@ jobs:
           cache-name: ${{ runner.os }}-sdl-gcc-cache-cmake-build
       with:
         append-timestamp: false
-        key: ${{ env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
+        key: ${{env.cache-name }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/**') }}
 
     - name: Print CPU Info
       run: cat /proc/cpuinfo
