@@ -1,0 +1,80 @@
+name: Build Win7 external GPU DLL only
+
+on:
+  push:
+    branches: [PS4_external_base]
+    paths:
+      - src/video_core/renderer_vulkan/win7_external_gpu_plugin.cpp
+      - src/video_core/renderer_vulkan/win7_external_gpu_api.h
+      - .github/workflows/build-win7-external-gpu-dll.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-gpu-dll:
+    name: Build external GPU DLL only
+    runs-on: windows-2022
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout minimal source
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Setup Visual Studio build environment
+        uses: egor-tensin/vs-shell@v2
+        with:
+          arch: x64
+
+      - name: Compile policy DLL directly
+        shell: pwsh
+        run: |
+          $clangCl = (Get-Command clang-cl.exe -ErrorAction Stop).Source
+          & $clangCl `
+            '/std:c++20' '/O2' '/DNDEBUG' '/MT' '/LD' `
+            '/D_WIN32_WINNT=0x0601' '/DWINVER=0x0601' `
+            '/DSHADPS4_WINDOWS_7_COMPAT' '/DNOMINMAX' '/DWIN32_LEAN_AND_MEAN' `
+            '/I' 'src' `
+            'src/video_core/renderer_vulkan/win7_external_gpu_plugin.cpp' `
+            '/link' '/OUT:shadps4-win7-gpu.dll'
+          if ($LASTEXITCODE -ne 0) { throw 'External GPU DLL-only compile failed' }
+          if (!(Test-Path 'shadps4-win7-gpu.dll')) { throw 'DLL output is missing' }
+
+      - name: Audit DLL
+        shell: pwsh
+        run: |
+          $exports = (& dumpbin.exe /exports 'shadps4-win7-gpu.dll' | Out-String)
+          $imports = (& dumpbin.exe /imports 'shadps4-win7-gpu.dll' | Out-String)
+          if (!$exports.Contains('shadps4_win7_gpu_query_policy')) {
+              throw 'External GPU policy export is missing'
+          }
+          foreach ($forbidden in @('VirtualAlloc2', 'CreateFileMapping2', 'MapViewOfFile3',
+                                   'UnmapViewOfFile2', 'SetThreadDescription',
+                                   'GetThreadDescription', 'GetSystemTimePreciseAsFileTime')) {
+              if ($imports.Contains($forbidden)) {
+                  throw "Forbidden post-Win7 import detected: $forbidden"
+              }
+          }
+          $exports | Out-File -Encoding ascii 'DLL-EXPORTS.txt'
+          $imports | Out-File -Encoding ascii 'DLL-IMPORTS.txt'
+          @"
+          This artifact is only the replaceable GPU policy module.
+          Use it with shadps4.exe from the matching PS4_external_base host artifact (ABI 1).
+          Close shadPS4, replace shadps4-win7-gpu.dll beside the EXE, then restart.
+          No shadps4.exe rebuild is required for policy-only experiments.
+          "@ | Out-File -Encoding ascii 'EXTERNAL-GPU-DLL-README.txt'
+
+      - name: Upload DLL-only artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: shadps4-win7-gpu-dll-${{ github.sha }}
+          path: |
+            shadps4-win7-gpu.dll
+            DLL-EXPORTS.txt
+            DLL-IMPORTS.txt
+            EXTERNAL-GPU-DLL-README.txt
+          if-no-files-found: error
+          retention-days: 30
