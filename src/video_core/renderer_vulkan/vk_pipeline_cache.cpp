@@ -20,7 +20,8 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-#include "video_core/renderer_vulkan/vk_shader_util.h"
+#inclue "video_core/renderer_vulkan/vk_shader_util.h"
+include "video_core/safe_gpu/safe_gpu.h"
 
 namespace Vulkan {
 
@@ -317,7 +318,13 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     InitializePipelineForensics();
 #endif
-    WarmUp();
+    if (VideoCore::SafeGpuGate::IsEnabled()) {
+        LOG_INFO(Render_Vulkan,
+                 "[SafeGPU] SKIP pipeline cache warm-up for Build 03; cached graphics/compute "
+                 "pipelines must not bypass the fail-closed policy");
+    } else {
+        WarmUp();
+    }
 
     auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
@@ -424,6 +431,23 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
     const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
     if (is_new) {
         const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+        if (VideoCore::SafeGpuGate::IsEnabled() &&
+            !VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(pipeline_hash)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 03 explicit whitelist "
+                     "before vkCreateGraphicsPipelines",
+                     pipeline_hash);
+            infos.fill(nullptr);
+            modules.fill(nullptr);
+            fetch_shader.reset();
+            return nullptr;
+        }
+        if (VideoCore::SafeGpuGate::IsEnabled()) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 03 explicit whitelist "
+                     "before vkCreateGraphicsPipelines",
+                    pipeline_hash);
+        }
         LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
 
         GraphicsPipeline::SerializationSupport sdata{};
@@ -448,10 +472,21 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
         }
         fetch_shader.reset();
     }
+    if (!it->second) {
+        infos.fill(nullptr);
+        modules.fill(nullptr);
+        fetch_shader.reset();
+        return nullptr;
+    }
     return it->second.get();
 }
 
 const ComputePipeline* PipelineCache::GetComputePipeline() {
+    if (VideoCore::SafeGpuGate::IsEnabled()) {
+        LOG_INFO(Render_Vulkan,
+                 "[SafeGPU] SKIP compute pipeline before shader/pipeline creation by Build 03 policy");
+        return nullptr;
+    }
     if (!RefreshComputeKey()) {
         return nullptr;
     }

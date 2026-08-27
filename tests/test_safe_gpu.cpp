@@ -77,6 +77,10 @@ TEST_F(SafeGpuPolicyTest, MilestoneTwoGraphicsAllowListFailsClosed) {
     basic.num_samples = 1;
     basic.depth_samples = 1;
     EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x8202f0d30159f803ULL));
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x762f3099a689a76fULL));
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x10dc0563ad6f6258ULL));
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x0ULL));
 
     basic.has_storage_images = true;
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
@@ -86,6 +90,8 @@ TEST_F(SafeGpuPolicyTest, MilestoneTwoGraphicsAllowListFailsClosed) {
 
     settings->SetSafeGPU(false);
     EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x0ULL));
     settings->SetNullGPU(true);
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x8202f0d30159f803ULL));
 }

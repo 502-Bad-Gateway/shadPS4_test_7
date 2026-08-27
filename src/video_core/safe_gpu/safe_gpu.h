@@ -30,11 +30,11 @@ struct SafeGpuGraphicsPipelineInfo {
 };
 
 // Central fail-closed policy boundary for the experimental Windows 7 SafeGPU renderer.
-// Milestone 2 permits only a conservative, explicitly classified graphics-pipeline subset.
+// Build 03 permits only an explicit known-safe pipeline hash set plus the conservative feature classifier.
 class SafeGpuGate final {
 public:
     static constexpr std::string_view PolicyVersion() noexcept {
-        return "milestone-2-first-graphics-v1";
+        return "milestone-2-pipeline-whitelist-v1";
     }
 
     static EffectiveGpuMode GetEffectiveMode() noexcept;
@@ -42,6 +42,7 @@ public:
     static bool IsEnabled() noexcept;
     static bool ShouldBindGuestRasterizer() noexcept;
     static bool ShouldAllowGraphics() noexcept;
+    static bool ShouldAllowGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;
     static bool ShouldAllowGraphicsPipeline(const SafeGpuGraphicsPipelineInfo& info) noexcept;
     static bool ShouldAllowCompute() noexcept;
     static bool ShouldAllowGuestCpSync() noexcept;
