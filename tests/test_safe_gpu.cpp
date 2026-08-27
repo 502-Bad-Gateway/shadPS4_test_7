@@ -82,6 +82,14 @@ TEST_F(SafeGpuPolicyTest, MilestoneTwoGraphicsAllowListFailsClosed) {
     EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x10dc0563ad6f6258ULL));
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x0ULL));
 
+    // Build 04: blending is permitted after the explicit hash whitelist.
+    basic.has_blending = true;
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    basic.has_logic_op = true;
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    basic.has_logic_op = false;
+    basic.has_blending = false;
+
     basic.has_storage_images = true;
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
     basic.has_storage_images = false;

@@ -30,12 +30,12 @@ struct SafeGpuGraphicsPipelineInfo {
 };
 
 // Central fail-closed policy boundary for the experimental Windows 7 SafeGPU renderer.
-// Build 03 requires an explicit known-safe pipeline hash and the conservative basic-feature
+// Build 04 requires an explicit known-safe pipeline hash and the conservative basic-feature
 // classifier before a guest graphics pipeline may reach Vulkan pipeline creation.
 class SafeGpuGate final {
 public:
     static constexpr std::string_view PolicyVersion() noexcept {
-        return "milestone-2-pipeline-whitelist-v1";
+        return "milestone-2-pipeline-whitelist-blending-v1";
     }
 
     static EffectiveGpuMode GetEffectiveMode() noexcept;

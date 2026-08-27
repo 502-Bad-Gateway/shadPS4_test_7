@@ -320,7 +320,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
 #endif
     if (VideoCore::SafeGpuGate::IsEnabled()) {
         LOG_INFO(Render_Vulkan,
-                 "[SafeGPU] SKIP pipeline cache warm-up for Build 03; cached graphics/compute "
+                 "[SafeGPU] SKIP pipeline cache warm-up for Build 04; cached graphics/compute "
                  "pipelines must not bypass the fail-closed policy");
     } else {
         WarmUp();
@@ -434,7 +434,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
         if (VideoCore::SafeGpuGate::IsEnabled() &&
             !VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(pipeline_hash)) {
             LOG_INFO(Render_Vulkan,
-                     "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 03 explicit whitelist "
+                     "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 04 explicit whitelist "
                      "before vkCreateGraphicsPipelines",
                      pipeline_hash);
             infos.fill(nullptr);
@@ -474,7 +474,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
             if (!VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(safe_info)) {
                 LOG_INFO(Render_Vulkan,
                          "[SafeGPU] SKIP whitelisted graphics pipeline hash={:#x}; "
-                         "Build 03 basic feature gate rejected it before "
+                         "Build 04 basic feature gate rejected it before "
                          "vkCreateGraphicsPipelines",
                          pipeline_hash);
                 infos.fill(nullptr);
@@ -483,7 +483,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
                 return nullptr;
             }
             LOG_INFO(Render_Vulkan,
-                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 03 explicit whitelist "
+                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 04 explicit whitelist "
                      "and basic feature gate before vkCreateGraphicsPipelines",
                      pipeline_hash);
         }
@@ -523,7 +523,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
 const ComputePipeline* PipelineCache::GetComputePipeline() {
     if (VideoCore::SafeGpuGate::IsEnabled()) {
         LOG_INFO(Render_Vulkan,
-                 "[SafeGPU] SKIP compute pipeline before shader/pipeline creation by Build 03 policy");
+                 "[SafeGPU] SKIP compute pipeline before shader/pipeline creation by Build 04 policy");
         return nullptr;
     }
     if (!RefreshComputeKey()) {

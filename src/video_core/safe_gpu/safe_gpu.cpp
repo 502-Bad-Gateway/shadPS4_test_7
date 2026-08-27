@@ -15,9 +15,9 @@ bool IsSimpleDwordRange(const std::uint64_t address, const std::uint32_t num_byt
            address <= std::numeric_limits<std::uint64_t>::max() - num_bytes;
 }
 
-bool IsBuild03GraphicsPipelineWhitelisted(const std::uint64_t pipeline_hash) noexcept {
+bool IsBuild04GraphicsPipelineWhitelisted(const std::uint64_t pipeline_hash) noexcept {
     // These three graphics pipelines are taken from a full-GPU We Are Doomed run that is known
-    // to complete on the target Windows 7 / NVIDIA setup. Build 03 admits nothing else.
+    // to complete on the target Windows 7 / NVIDIA setup. Build 04 admits nothing else.
     switch (pipeline_hash) {
     case 0x8202f0d30159f803ULL:
     case 0x762f3099a689a76fULL:
@@ -70,7 +70,7 @@ bool SafeGpuGate::ShouldAllowGraphicsPipelineHash(const std::uint64_t pipeline_h
         return true;
     }
     return mode == EffectiveGpuMode::SafeGPU &&
-           IsBuild03GraphicsPipelineWhitelisted(pipeline_hash);
+           IsBuild04GraphicsPipelineWhitelisted(pipeline_hash);
 }
 
 bool SafeGpuGate::ShouldAllowGraphicsPipeline(
@@ -83,12 +83,12 @@ bool SafeGpuGate::ShouldAllowGraphicsPipeline(
         return false;
     }
 
-    // Build 03 feature gate: allow only a basic vertex/fragment, single-target,
+    // Build 04 feature gate: allow only a basic vertex/fragment, single-target,
     // single-sample color pipeline. Compute and complex attachment/shader paths remain
     // outside this allow-list and therefore fail closed.
     return info.has_vertex_shader && info.has_fragment_shader && !info.has_tessellation_shader &&
            !info.has_geometry_shader && !info.has_storage_images && !info.has_depth_or_stencil &&
-           !info.has_blending && !info.has_logic_op && info.num_color_attachments == 1 &&
+           !info.has_logic_op && info.num_color_attachments == 1 &&
            info.mrt_mask == 1 && info.num_samples == 1 && info.depth_samples == 1;
 }
 
