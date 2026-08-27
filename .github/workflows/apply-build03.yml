@@ -1,0 +1,230 @@
+name: Apply SafeGPU Build 03 source patch
+
+on:
+  push:
+    branches:
+      - build03-applier-20260827
+    paths:
+      - .github/workflows/apply-build03.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: shadps4_clone
+          fetch-depth: 0
+
+      - name: Apply Build 03 patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one match, found {count}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          # SafeGPU policy: Build 03 adds an explicit hash allow-list on top of the
+          # existing basic vertex/fragment feature classifier.
+          replace_once(
+              "src/video_core/safe_gpu/safe_gpu.h",
+              "// Milestone 2 permits only a conservative, explicitly classified graphics-pipeline subset.",
+              "// Build 03 permits only an explicit known-safe pipeline hash set plus the conservative feature classifier.",
+          )
+          replace_once(
+              "src/video_core/safe_gpu/safe_gpu.h",
+              '        return "milestone-2-first-graphics-v1";',
+              '        return "milestone-2-pipeline-whitelist-v1";',
+          )
+          replace_once(
+              "src/video_core/safe_gpu/safe_gpu.h",
+              "    static bool ShouldAllowGraphics() noexcept;\n    static bool ShouldAllowGraphicsPipeline(const SafeGpuGraphicsPipelineInfo& info) noexcept;",
+              "    static bool ShouldAllowGraphics() noexcept;\n    static bool ShouldAllowGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;\n    static bool ShouldAllowGraphicsPipeline(const SafeGpuGraphicsPipelineInfo& info) noexcept;",
+          )
+
+          replace_once(
+              "src/video_core/safe_gpu/safe_gpu.cpp",
+              """bool IsSimpleDwordRange(const std::uint64_t address, const std::uint32_t num_bytes) noexcept {
+    return address != 0 && num_bytes != 0 && (address & 3U) == 0 && (num_bytes & 3U) == 0 &&
+           address <= std::numeric_limits<std::uint64_t>::max() - num_bytes;
+}
+""",
+              """bool IsSimpleDwordRange(const std::uint64_t address, const std::uint32_t num_bytes) noexcept {
+    return address != 0 && num_bytes != 0 && (address & 3U) == 0 && (num_bytes & 3U) == 0 &&
+           address <= std::numeric_limits<std::uint64_t>::max() - num_bytes;
+}
+
+bool IsBuild03GraphicsPipelineWhitelisted(const std::uint64_t pipeline_hash) noexcept {
+    // These three graphics pipelines are taken from a full-GPU We Are Doomed run that is known
+    // to complete on the target Windows 7 / NVIDIA setup. Build 03 admits nothing else.
+    switch (pipeline_hash) {
+    case 0x8202f0d30159f803ULL:
+    case 0x762f3099a689a76fULL:
+    case 0x10dc0563ad6f6258ULL:
+        return true;
+    default:
+        return false;
+    }
+}
+""",
+          )
+          replace_once(
+              "src/video_core/safe_gpu/safe_gpu.cpp",
+              """bool SafeGpuGate::ShouldAllowGraphics() noexcept {
+    return GetEffectiveMode() != EffectiveGpuMode::NullGPU;
+}
+
+bool SafeGpuGate::ShouldAllowGraphicsPipeline(
+""",
+              """bool SafeGpuGate::ShouldAllowGraphics() noexcept {
+    return GetEffectiveMode() != EffectiveGpuMode::NullGPU;
+}
+
+bool SafeGpuGate::ShouldAllowGraphicsPipelineHash(const std::uint64_t pipeline_hash) noexcept {
+    const auto mode = GetEffectiveMode();
+    if (mode == EffectiveGpuMode::FullGPU) {
+        return true;
+    }
+    return mode == EffectiveGpuMode::SafeGPU &&
+           IsBuild03GraphicsPipelineWhitelisted(pipeline_hash);
+}
+
+bool SafeGpuGate::ShouldAllowGraphicsPipeline(
+""",
+          )
+          replace_once(
+              "src/video_core/safe_gpu/safe_gpu.cpp",
+              "    // First graphics experiment: allow only a basic vertex/fragment, single-target,\n",
+              "    // Build 03 feature gate: allow only a basic vertex/fragment, single-target,\n",
+          )
+
+          # Prevent unknown graphics pipelines from reaching vkCreateGraphicsPipelines. Also skip
+          # cache warm-up in SafeGPU so cached graphics/compute pipelines cannot bypass the gate.
+          replace_once(
+              "src/video_core/renderer_vulkan/vk_pipeline_cache.cpp",
+              '#include "video_core/renderer_vulkan/vk_shader_util.h"\n',
+              '#include "video_core/renderer_vulkan/vk_shader_util.h"\n#include "video_core/safe_gpu/safe_gpu.h"\n',
+          )
+          replace_once(
+              "src/video_core/renderer_vulkan/vk_pipeline_cache.cpp",
+              "    WarmUp();\n",
+              """    if (VideoCore::SafeGpuGate::IsEnabled()) {
+        LOG_INFO(Render_Vulkan,
+                 "[SafeGPU] SKIP pipeline cache warm-up for Build 03; cached graphics/compute "
+                 "pipelines must not bypass the fail-closed policy");
+    } else {
+        WarmUp();
+    }
+""",
+          )
+          replace_once(
+              "src/video_core/renderer_vulkan/vk_pipeline_cache.cpp",
+              """    const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
+    if (is_new) {
+        const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+        LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
+""",
+              """    const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
+    if (is_new) {
+        const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
+        if (VideoCore::SafeGpuGate::IsEnabled() &&
+            !VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(pipeline_hash)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 03 explicit whitelist "
+                     "before vkCreateGraphicsPipelines",
+                     pipeline_hash);
+            infos.fill(nullptr);
+            modules.fill(nullptr);
+            fetch_shader.reset();
+            return nullptr;
+        }
+        if (VideoCore::SafeGpuGate::IsEnabled()) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 03 explicit whitelist "
+                     "before vkCreateGraphicsPipelines",
+                     pipeline_hash);
+        }
+        LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
+""",
+          )
+          replace_once(
+              "src/video_core/renderer_vulkan/vk_pipeline_cache.cpp",
+              """    return it->second.get();
+}
+
+const ComputePipeline* PipelineCache::GetComputePipeline() {
+    if (!RefreshComputeKey()) {
+""",
+              """    if (!it->second) {
+        infos.fill(nullptr);
+        modules.fill(nullptr);
+        fetch_shader.reset();
+        return nullptr;
+    }
+    return it->second.get();
+}
+
+const ComputePipeline* PipelineCache::GetComputePipeline() {
+    if (VideoCore::SafeGpuGate::IsEnabled()) {
+        LOG_INFO(Render_Vulkan,
+                 "[SafeGPU] SKIP compute pipeline before shader/pipeline creation by Build 03 policy");
+        return nullptr;
+    }
+    if (!RefreshComputeKey()) {
+""",
+          )
+
+          # Unit coverage for hash fail-closed behavior and mode precedence.
+          replace_once(
+              "tests/test_safe_gpu.cpp",
+              """    basic.depth_samples = 1;
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+
+    basic.has_storage_images = true;
+""",
+              """    basic.depth_samples = 1;
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x8202f0d30159f803ULL));
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x762f3099a689a76fULL));
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x10dc0563ad6f6258ULL));
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x0ULL));
+
+    basic.has_storage_images = true;
+""",
+          )
+          replace_once(
+              "tests/test_safe_gpu.cpp",
+              """    settings->SetSafeGPU(false);
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    settings->SetNullGPU(true);
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+""",
+              """    settings->SetSafeGPU(false);
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x0ULL));
+    settings->SetNullGPU(true);
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
+    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x8202f0d30159f803ULL));
+""",
+          )
+
+      - name: Commit Build 03 source changes
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "502-Bad-Gateway"
+          git config user.email "135363699+502-Bad-Gateway@users.noreply.github.com"
+          git add src/video_core/safe_gpu/safe_gpu.h \
+                  src/video_core/safe_gpu/safe_gpu.cpp \
+                  src/video_core/renderer_vulkan/vk_pipeline_cache.cpp \
+                  tests/test_safe_gpu.cpp
+          git commit -m "Add SafeGPU Build 03 pipeline whitelist"
+          git push origin HEAD:shadps4_clone
