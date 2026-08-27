@@ -34,7 +34,7 @@ TEST_F(SafeGpuPolicyTest, MilestoneOneModePrecedenceAndBinding) {
     settings->SetSafeGPU(true);
     EXPECT_EQ(VideoCore::SafeGpuGate::GetEffectiveMode(), VideoCore::EffectiveGpuMode::SafeGPU);
     EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldBindGuestRasterizer());
-    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphics());
+    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphics());
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowCompute());
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGuestCpSync());
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldWaitForGuestRewind());

@@ -279,6 +279,16 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         }
         return;
     }
+    if (safe_gpu_active &&
+        liverpool->regs.color_control.mode != AmdGpu::ColorControl::OperationMode::Normal) {
+        const u64 count = ++safe_gpu_stats.graphics_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP non-normal graphics operation mode={} count={}",
+                     static_cast<u32>(liverpool->regs.color_control.mode), count);
+        }
+        return;
+    }
 
     scheduler.PopPendingOperations();
 
@@ -353,6 +363,16 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         if (ShouldLogSafeGpuSample(count)) {
             LOG_INFO(Render_Vulkan, "[SafeGPU] SKIP graphics indirect draw indexed={} count={}",
                      is_indexed, count);
+        }
+        return;
+    }
+    if (safe_gpu_active &&
+        liverpool->regs.color_control.mode != AmdGpu::ColorControl::OperationMode::Normal) {
+        const u64 count = ++safe_gpu_stats.graphics_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP non-normal graphics operation mode={} count={}",
+                     static_cast<u32>(liverpool->regs.color_control.mode), count);
         }
         return;
     }

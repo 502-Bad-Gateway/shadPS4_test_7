@@ -48,7 +48,7 @@ bool SafeGpuGate::ShouldBindGuestRasterizer() noexcept {
 }
 
 bool SafeGpuGate::ShouldAllowGraphics() noexcept {
-    return GetEffectiveMode() == EffectiveGpuMode::FullGPU;
+    return GetEffectiveMode() != EffectiveGpuMode::NullGPU;
 }
 
 bool SafeGpuGate::ShouldAllowGraphicsPipeline(
