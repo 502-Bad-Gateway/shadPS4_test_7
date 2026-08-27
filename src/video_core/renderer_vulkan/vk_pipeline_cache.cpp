@@ -20,8 +20,8 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-#inclue "video_core/renderer_vulkan/vk_shader_util.h"
-include "video_core/safe_gpu/safe_gpu.h"
+#include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "video_core/safe_gpu/safe_gpu.h"
 
 namespace Vulkan {
 
