@@ -142,6 +142,7 @@ private:
     GraphicsPipelineKey graphics_key{};
     ComputePipelineKey compute_key{};
     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
+    vk::ShaderModule safe_gpu_flat_fragment_module{};
 
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     std::atomic<u64> pipeline_forensics_sequence{};
