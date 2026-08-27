@@ -81,7 +81,8 @@ bool SafeGpuGate::IsKnownControlGraphicsPipelineHash(
 }
 
 bool SafeGpuGate::ShouldUseFlatFragment(const std::uint64_t pipeline_hash) noexcept {
-    return GetEffectiveMode() == EffectiveGpuMode::SafeGPU && !IsKnownControlGraphicsPipelineHashImpl(pipeline_hash);
+    return GetEffectiveMode() == EffectiveGpuMode::SafeGPU &&
+           !IsKnownControlGraphicsPipelineHashImpl(pipeline_hash);
 }
 
 bool SafeGpuGate::ShouldAllowGraphicsPipeline(
@@ -102,6 +103,14 @@ bool SafeGpuGate::ShouldAllowGraphicsPipeline(
         info.num_samples == 1 && info.depth_samples == 1;
     if (!common_simple) {
         return false;
+    }
+
+    // PipelineCache performs the complete Build 06 classification before creating a graphics
+    // pipeline. Rasterizer then performs a post-create recheck using the older aggregate layout,
+    // which has no pipeline hash or split sampled/depth/stencil metadata. A zero hash therefore
+    // means "already classified by PipelineCache" here; retain the shared structural checks above.
+    if (info.pipeline_hash == 0) {
+        return true;
     }
 
     // Preserve the three Build 04 We Are Doomed pipelines as a native-rendering
