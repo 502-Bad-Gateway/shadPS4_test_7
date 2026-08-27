@@ -10,8 +10,6 @@ on:
       - src/video_core/renderer_vulkan/win7_external_gpu.cpp
       - src/video_core/renderer_vulkan/win7_external_gpu.h
       - src/video_core/renderer_vulkan/win7_external_gpu_api.h
-      - src/video_core/renderer_vulkan/win7_external_gpu_plugin.cpp
-      - .github/workflows/build-win7-external-host.yml
   workflow_dispatch:
 
 permissions:
