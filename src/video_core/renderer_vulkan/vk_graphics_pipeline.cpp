@@ -16,6 +16,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "video_core/renderer_vulkan/win7_external_gpu.h"
 
 namespace Vulkan {
 
@@ -461,12 +462,23 @@ GraphicsPipeline::GraphicsPipeline(
     // In practice, we use dynamic state for all of it.
     constexpr vk::PipelineDepthStencilStateCreateInfo depth_stencil_info = {};
 
+    vk::PipelineCreateFlags pipeline_flags{};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    if (Win7ExternalGpu::IsEnabled(
+            Win7ExternalGpu::PolicyFlag::DisableGraphicsPipelineOptimization)) {
+        pipeline_flags |= vk::PipelineCreateFlagBits::eDisableOptimization;
+        LOG_WARNING(Render_Vulkan,
+                    "External GPU policy: disabled graphics pipeline optimization");
+    }
+#endif
+
     const vk::GraphicsPipelineCreateInfo pipeline_info = {
 #ifdef SHADPS4_WINDOWS_7_COMPAT
         .pNext = nullptr,
 #else
         .pNext = &pipeline_rendering_ci,
 #endif
+        .flags = pipeline_flags,
         .stageCount = static_cast<u32>(shader_stages.size()),
         .pStages = shader_stages.data(),
         .pVertexInputState = !instance.IsVertexInputDynamicState() ? &vertex_input_info : nullptr,
@@ -506,9 +518,10 @@ GraphicsPipeline::GraphicsPipeline(
                               VK_VERSION_PATCH(instance.ApiVersion()),
                               vk::to_string(instance.GetDriverID()), profile.supported_spirv);
         report += fmt::format(
-            "pipeline_cache_present={}\npipeline_create_flags=0\nlegacy_render_pass=true\n"
-            "stage_count={}\n",
-            bool(pipeline_cache), shader_stages.size());
+            "pipeline_cache_present={}\npipeline_create_flags=0x{:x}\n"
+            "legacy_render_pass=true\nstage_count={}\n",
+            bool(pipeline_cache), static_cast<VkPipelineCreateFlags>(pipeline_flags),
+            shader_stages.size());
 
         for (u32 index = 0; index < MaxShaderStages; ++index) {
             if (!infos[index]) {

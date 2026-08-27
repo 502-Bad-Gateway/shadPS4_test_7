@@ -1117,6 +1117,9 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/renderer_vulkan/liverpool_to_vk.h
                src/video_core/renderer_vulkan/vk_common.cpp
                src/video_core/renderer_vulkan/vk_common.h
+               src/video_core/renderer_vulkan/win7_external_gpu.cpp
+               src/video_core/renderer_vulkan/win7_external_gpu.h
+               src/video_core/renderer_vulkan/win7_external_gpu_api.h
                src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
                src/video_core/renderer_vulkan/vk_compute_pipeline.h
                src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
@@ -1255,6 +1258,20 @@ set(SHADNET src/shadnet/client.cpp
 )
 if (APPLE)
     list(APPEND EMULATOR src/sdl_window_apple.mm)
+endif()
+
+if (WIN32 AND ENABLE_WINDOWS_7_COMPAT)
+    add_library(shadps4-win7-gpu SHARED
+        src/video_core/renderer_vulkan/win7_external_gpu_api.h
+        src/video_core/renderer_vulkan/win7_external_gpu_plugin.cpp)
+    set_target_properties(shadps4-win7-gpu PROPERTIES
+        OUTPUT_NAME "shadps4-win7-gpu"
+        PREFIX ""
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    target_compile_definitions(shadps4-win7-gpu PRIVATE
+        NTDDI_VERSION=0x06010000 _WIN32_WINNT=0x0601 WINVER=0x0601
+        SHADPS4_WINDOWS_7_COMPAT NOMINMAX WIN32_LEAN_AND_MEAN)
+    create_target_directory_groups(shadps4-win7-gpu)
 endif()
 
 if(NOT ENABLE_TESTS)

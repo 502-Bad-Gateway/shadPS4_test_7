@@ -13,6 +13,7 @@
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "video_core/renderer_vulkan/win7_external_gpu.h"
 
 #include <vk_mem_alloc.h>
 
@@ -171,6 +172,13 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
     properties = physical_device.getProperties();
     memory_properties = physical_device.getMemoryProperties();
     CollectDeviceParameters();
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    Win7ExternalGpu::Initialize(
+        properties.apiVersion, static_cast<u32>(driver_id), properties.vendorID,
+        properties.deviceID, properties.driverVersion,
+        driver_id == vk::DriverId::eNvidiaProprietary &&
+            properties.apiVersion < VK_API_VERSION_1_3);
+#endif
     ASSERT_MSG(properties.apiVersion >= TargetVulkanApiVersion,
                "Vulkan {}.{} is required, but only {}.{} is supported by device!",
                VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
@@ -493,7 +501,19 @@ bool Instance::CreateDevice() {
     custom_border_color = add_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
     depth_clip_control = add_extension(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME);
     depth_clip_enable = add_extension(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    if (Win7ExternalGpu::IsEnabled(
+            Win7ExternalGpu::PolicyFlag::DisableVertexInputDynamicState)) {
+        vertex_input_dynamic_state = false;
+        LOG_WARNING(Render_Vulkan,
+                    "External GPU policy: disabled dynamic vertex input");
+    } else {
+        vertex_input_dynamic_state =
+            add_extension(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
+    }
+#else
     vertex_input_dynamic_state = add_extension(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
+#endif
     list_restart = add_extension(VK_EXT_PRIMITIVE_TOPOLOGY_LIST_RESTART_EXTENSION_NAME);
     if (list_restart) {
         list_restart_features =
@@ -514,7 +534,19 @@ bool Instance::CreateDevice() {
     image_load_store_lod = add_extension(VK_AMD_SHADER_IMAGE_LOAD_STORE_LOD_EXTENSION_NAME);
     amd_gcn_shader = add_extension(VK_AMD_GCN_SHADER_EXTENSION_NAME);
     amd_shader_trinary_minmax = add_extension(VK_AMD_SHADER_TRINARY_MINMAX_EXTENSION_NAME);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    if (Win7ExternalGpu::IsEnabled(
+            Win7ExternalGpu::PolicyFlag::DisableNvFramebufferMixedSamples)) {
+        nv_framebuffer_mixed_samples = false;
+        LOG_WARNING(Render_Vulkan,
+                    "External GPU policy: disabled NVIDIA framebuffer mixed samples");
+    } else {
+        nv_framebuffer_mixed_samples =
+            add_extension(VK_NV_FRAMEBUFFER_MIXED_SAMPLES_EXTENSION_NAME);
+    }
+#else
     nv_framebuffer_mixed_samples = add_extension(VK_NV_FRAMEBUFFER_MIXED_SAMPLES_EXTENSION_NAME);
+#endif
     amd_mixed_attachment_samples = add_extension(VK_AMD_MIXED_ATTACHMENT_SAMPLES_EXTENSION_NAME);
     shader_atomic_float = add_extension(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     shader_atomic_float2 = add_extension(VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME);
