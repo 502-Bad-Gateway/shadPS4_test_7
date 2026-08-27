@@ -28,23 +28,29 @@ jobs:
             git checkout -B "$branch" "origin/$branch"
             python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("src/video_core/renderer_vulkan/vk_pipeline_cache.cpp")
           text = path.read_text(encoding="utf-8")
-          old = '''                .has_blending = has_blending,
-                .pipeline_hash = pipeline_hash,
-                .has_logic_op =
-                    graphics_key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,
-          '''
-          new = '''                .has_blending = has_blending,
-                .has_logic_op =
-                    graphics_key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,
-                .pipeline_hash = pipeline_hash,
-          '''
-          count = text.count(old)
-          if count != 1:
-              raise RuntimeError(f"expected exactly one initializer-order match, found {count}")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          pattern = re.compile(
+              r"(?m)^(?P<i>[ \t]*)\.has_blending = has_blending,\n"
+              r"(?P=i)\.pipeline_hash = pipeline_hash,\n"
+              r"(?P=i)\.has_logic_op =\n"
+              r"(?P<c>[ \t]*)graphics_key\.logic_op != AmdGpu::ColorControl::LogicOp::Copy,\n"
+          )
+          matches = list(pattern.finditer(text))
+          if len(matches) != 1:
+              raise RuntimeError(f"expected exactly one initializer-order match, found {len(matches)}")
+          m = matches[0]
+          i = m.group("i")
+          c = m.group("c")
+          replacement = (
+              f"{i}.has_blending = has_blending,\n"
+              f"{i}.has_logic_op =\n"
+              f"{c}graphics_key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,\n"
+              f"{i}.pipeline_hash = pipeline_hash,\n"
+          )
+          path.write_text(text[:m.start()] + replacement + text[m.end():], encoding="utf-8")
           PY
             git diff --check
             git add src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
