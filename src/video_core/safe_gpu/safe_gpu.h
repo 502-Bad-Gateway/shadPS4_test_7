@@ -23,6 +23,9 @@ struct SafeGpuGraphicsPipelineInfo {
     bool has_depth{};
     bool has_stencil{};
     bool has_sampled_resources{};
+    // Compatibility input used by the rasterizer's post-create recheck. Build 05's
+    // authoritative pre-create classifier uses the split fields above.
+    bool has_depth_or_stencil{};
     bool has_blending{};
     bool has_logic_op{};
     std::uint64_t pipeline_hash{};
