@@ -47,6 +47,7 @@
 #include "emulator.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderdoc.h"
+#include "video_core/safe_gpu/safe_gpu.h"
 
 #ifdef _WIN32
 #include <WinSock2.h>
@@ -433,11 +434,22 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     EmulatorSettings.Load(id);
 #ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
     LOG_INFO(Config,
-             "Windows 7 compatibility-only settings active: null_gpu={}, "
+             "Windows 7 compatibility-only settings active: null_gpu={}, safe_gpu={}, "
              "show_fps_counter={}, show_splash={}",
-             EmulatorSettings.IsNullGPU(), EmulatorSettings.IsShowFpsCounter(),
-             EmulatorSettings.IsShowSplash());
+             EmulatorSettings.IsNullGPU(), EmulatorSettings.IsSafeGPU(),
+             EmulatorSettings.IsShowFpsCounter(), EmulatorSettings.IsShowSplash());
 #endif
+    if (VideoCore::SafeGpuGate::IsEnabled()) {
+        LOG_INFO(Config, "SafeGPU: enabled");
+    } else {
+        LOG_INFO(Config, "SafeGPU: disabled");
+    }
+    LOG_INFO(Config, "NullGPU: {}", EmulatorSettings.IsNullGPU());
+    LOG_INFO(Config, "SafeGPU policy/version: {}", VideoCore::SafeGpuGate::PolicyVersion());
+    LOG_INFO(Config, "GPU effective mode: {}", VideoCore::SafeGpuGate::GetEffectiveModeName());
+    if (EmulatorSettings.IsNullGPU() && EmulatorSettings.IsSafeGPU()) {
+        LOG_WARNING(Config, "SafeGPU was requested with NullGPU; NullGPU takes precedence");
+    }
     // Windows static guest red-zone protection
     WindowsGuestRedZoneProtection::SetActiveMode(
         EmulatorSettings.GetWindowsGuestRedZoneProtectionMode());
@@ -495,6 +507,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     LOG_INFO(Config, "Log type: {}", EmulatorSettings.GetLogType());
 #endif
     LOG_INFO(Config, "GPU isNullGpu: {}", EmulatorSettings.IsNullGPU());
+    LOG_INFO(Config, "GPU isSafeGpu: {}", EmulatorSettings.IsSafeGPU());
     LOG_INFO(Config, "GPU readbacksMode: {}", EmulatorSettings.GetReadbacksMode());
     LOG_INFO(Config, "GPU readbackLinearImages: {}",
              EmulatorSettings.IsReadbackLinearImagesEnabled());

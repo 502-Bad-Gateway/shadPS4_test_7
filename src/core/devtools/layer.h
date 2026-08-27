@@ -17,6 +17,7 @@ public:
 
     // Must be inside a window
     static void DrawNullGpuNotice();
+    static void DrawSafeGpuNotice();
 
 private:
     static void DrawMenuBar();

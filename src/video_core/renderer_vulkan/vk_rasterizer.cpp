@@ -12,6 +12,7 @@
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_hle.h"
+#include "video_core/safe_gpu/safe_gpu.h"
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/texture_cache.h"
 
@@ -40,7 +41,14 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
       liverpool{liverpool_}, memory{Core::Memory::Instance()},
       pipeline_cache{instance, scheduler, liverpool} {
     if (!EmulatorSettings.IsNullGPU()) {
-        liverpool->BindRasterizer(this);
+        if (VideoCore::SafeGpuGate::ShouldBindGuestRasterizer()) {
+            liverpool->BindRasterizer(this);
+        } else {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP guest rasterizer binding; all guest graphics, compute, and "
+                     "transfer rendering work is disabled by policy {}",
+                     VideoCore::SafeGpuGate::PolicyVersion());
+        }
     }
     memory->SetRasterizer(this);
 }

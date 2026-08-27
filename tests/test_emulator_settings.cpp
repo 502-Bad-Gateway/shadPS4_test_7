@@ -213,6 +213,7 @@ TEST_F(EmulatorSettingsTest, SetDefaultValuesResetsAllGroupsToFactory) {
     // set random values
     temp_settings->SetNeo(true);
     temp_settings->SetWindowWidth(3840u);
+    temp_settings->SetSafeGPU(true);
     temp_settings->SetGpuId(2);
     temp_settings->SetDebugDump(true);
     temp_settings->SetCursorState(HideCursorState::Always);
@@ -221,6 +222,7 @@ TEST_F(EmulatorSettingsTest, SetDefaultValuesResetsAllGroupsToFactory) {
     // check if values are reset to defaults
     EXPECT_FALSE(temp_settings->IsNeo());
     EXPECT_EQ(temp_settings->GetWindowWidth(), 1280u);
+    EXPECT_FALSE(temp_settings->IsSafeGPU());
     EXPECT_EQ(temp_settings->GetGpuId(), -1);
     EXPECT_FALSE(temp_settings->IsDebugDump());
     EXPECT_EQ(temp_settings->GetCursorState(), static_cast<int>(HideCursorState::Idle));
@@ -322,6 +324,17 @@ TEST_F(EmulatorSettingsTest, RoundTripAllGroups) {
     EXPECT_EQ(f->GetGpuId(), 1);
     EXPECT_EQ(f->GetCursorState(), static_cast<int>(HideCursorState::Always));
     EXPECT_EQ(f->GetAudioBackend(), static_cast<u32>(AudioBackend::OpenAL));
+}
+
+TEST_F(EmulatorSettingsTest, SafeGpuDefaultsOffAndRoundTrips) {
+    EXPECT_FALSE(temp_settings->IsSafeGPU());
+    temp_settings->SetSafeGPU(true);
+    ASSERT_TRUE(temp_settings->Save());
+
+    auto fresh = std::make_shared<EmulatorSettingsImpl>();
+    EmulatorSettingsImpl::SetInstance(fresh);
+    ASSERT_TRUE(fresh->Load());
+    EXPECT_TRUE(fresh->IsSafeGPU());
 }
 
 TEST_F(EmulatorSettingsTest, LoadMissingFileCreatesDefaultsOnDisk) {
@@ -700,6 +713,7 @@ TEST_F(EmulatorSettingsTest, GetAllOverrideableKeysContainsRepresentativeKeys) {
     // GPU
     EXPECT_TRUE(has("window_width"));
     EXPECT_TRUE(has("null_gpu"));
+    EXPECT_TRUE(has("safe_gpu"));
     EXPECT_TRUE(has("vblank_frequency"));
     // Vulkan
     EXPECT_TRUE(has("gpu_id"));
@@ -735,6 +749,7 @@ TEST_F(EmulatorSettingsTest, GetGPUOverrideableFieldsContainsWindowAndFullscreen
     EXPECT_TRUE(has("window_width"));
     EXPECT_TRUE(has("window_height"));
     EXPECT_TRUE(has("full_screen"));
+    EXPECT_TRUE(has("safe_gpu"));
     EXPECT_TRUE(has("vblank_frequency"));
 }
 

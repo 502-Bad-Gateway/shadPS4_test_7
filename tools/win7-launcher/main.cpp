@@ -68,6 +68,12 @@ struct ValueOption {
     json value;
 };
 
+struct GpuModeInfo {
+    bool null_gpu = false;
+    bool safe_gpu = false;
+    std::wstring name = L"vulkan";
+};
+
 struct RunContext {
     HANDLE process = nullptr;
     std::wstring result_dir;
@@ -81,6 +87,7 @@ struct RunContext {
     std::wstring mode;
     std::wstring started_at;
     bool null_gpu = false;
+    bool safe_gpu = false;
     uint64_t shadps4_log_start = 0;
     uint64_t shad_log_start = 0;
 };
@@ -359,6 +366,7 @@ json DefaultConfig() {
     "internal_screen_height": 720,
     "internal_screen_width": 1280,
     "null_gpu": false,
+    "safe_gpu": false,
     "patch_shaders": false,
     "present_mode": "Mailbox",
     "rcas_attenuation": 250,
@@ -595,7 +603,7 @@ bool IsOverrideable(const std::string& section, const std::string& key) {
           "openal_padSpk_output_device", "openal_hrtf", "openal_output_mode"}},
         {"WindowsGuestRedZoneProtection", {"windows_guest_red_zone_protection_mode"}},
         {"GPU",
-         {"null_gpu", "copy_gpu_buffers", "full_screen", "full_screen_mode",
+         {"null_gpu", "safe_gpu", "copy_gpu_buffers", "full_screen", "full_screen_mode",
           "present_mode", "window_height", "window_width", "hdr_allowed", "fsr_enabled",
           "rcas_enabled", "rcas_attenuation", "dump_shaders", "patch_shaders",
           "readbacks_mode", "readback_linear_images_enabled",
@@ -815,6 +823,23 @@ void SetStatus(const std::wstring& text) {
     SetWindowTextW(g_status, text.c_str());
 }
 
+GpuModeInfo GetGpuModeInfo(const json& config) {
+    GpuModeInfo result;
+    try {
+        if (config.contains("GPU") && config["GPU"].is_object()) {
+            result.null_gpu = config["GPU"].value("null_gpu", false);
+            result.safe_gpu = config["GPU"].value("safe_gpu", false);
+        }
+    } catch (...) {
+    }
+    if (result.null_gpu) {
+        result.name = L"nullgpu";
+    } else if (result.safe_gpu) {
+        result.name = L"safegpu";
+    }
+    return result;
+}
+
 bool IsGlobalScope() {
     return SendMessageW(g_scope, CB_GETCURSEL, 0, 0) == 1;
 }
@@ -826,16 +851,9 @@ bool HasProfileValue(const std::string& section, const std::string& key) {
 
 void UpdateDetectedLabel() {
     std::wstring id = g_detected_game.title_id.empty() ? L"UNKNOWN" : g_detected_game.title_id;
-    bool null_gpu = false;
-    try {
-        if (g_effective_config.contains("GPU") && g_effective_config["GPU"].is_object()) {
-            null_gpu = g_effective_config["GPU"].value("null_gpu", false);
-        }
-    } catch (...) {
-    }
+    const GpuModeInfo gpu_mode = GetGpuModeInfo(g_effective_config);
     std::wstring text = L"Detected: " + id + L"  |  " + g_detected_game.title +
-                        L"  |  launch mode from config: " +
-                        (null_gpu ? L"nullgpu" : L"vulkan");
+                        L"  |  launch mode from config: " + gpu_mode.name;
     SetWindowTextW(g_game_info, text.c_str());
 }
 
@@ -1377,6 +1395,7 @@ unsigned __stdcall WaitForRun(void* parameter) {
     run_info["eboot"] = WideToUtf8(context->eboot);
     run_info["mode"] = WideToUtf8(context->mode);
     run_info["null_gpu"] = context->null_gpu;
+    run_info["safe_gpu"] = context->safe_gpu;
     run_info["started_at"] = WideToUtf8(context->started_at);
     run_info["finished_at"] = WideToUtf8(IsoTimestampNow());
     run_info["exit_code"] = exit_code;
@@ -1427,12 +1446,8 @@ void LaunchGame() {
         return;
     }
 
-    bool null_gpu = false;
-    try {
-        null_gpu = g_effective_config["GPU"].value("null_gpu", false);
-    } catch (...) {
-    }
-    const std::wstring mode = null_gpu ? L"nullgpu" : L"vulkan";
+    const GpuModeInfo gpu_mode = GetGpuModeInfo(g_effective_config);
+    const std::wstring mode = gpu_mode.name;
     const std::wstring title_id =
         g_detected_game.title_id.empty() ? L"UNKNOWN" : g_detected_game.title_id;
     const std::wstring result_dir =
@@ -1515,7 +1530,8 @@ void LaunchGame() {
     context->eboot = g_eboot_path;
     context->mode = mode;
     context->started_at = IsoTimestampNow();
-    context->null_gpu = null_gpu;
+    context->null_gpu = gpu_mode.null_gpu;
+    context->safe_gpu = gpu_mode.safe_gpu;
     context->shadps4_log_start = shadps4_log_start;
     context->shad_log_start = shad_log_start;
 

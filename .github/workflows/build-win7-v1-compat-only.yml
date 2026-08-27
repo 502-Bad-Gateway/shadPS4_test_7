@@ -1,8 +1,8 @@
-name: Build shadPS4 Win7 V1 pipeline forensics
+name: Build shadPS4 Win7 SafeGPU 00 null parity
 
 on:
   push:
-    branches: [win7-v1-compat-only]
+    branches: [shadps4]
     paths:
       - CMakeLists.txt
       - src/**
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 pipeline-forensics target
+    name: Build Windows 7 x64 SafeGPU null-parity target
     runs-on: windows-2022
     timeout-minutes: 120
 
@@ -128,7 +128,7 @@ jobs:
               Pop-Location
           }
 
-      - name: Package and audit artifact
+      - name: Package and audit SafeGPU artifact
         shell: pwsh
         run: |
           $output = Join-Path $env:GITHUB_WORKSPACE 'artifact'
@@ -165,7 +165,12 @@ jobs:
                                   'Windows 7 Vulkan 1.2 compatibility active',
                                   'Win7 pipeline forensics enabled',
                                   'Win7 pipeline forensics START',
-                                  'Win7 pipeline forensics SUCCESS')) {
+                                  'Win7 pipeline forensics SUCCESS',
+                                  'SafeGPU: enabled',
+                                  'SafeGPU policy/version:',
+                                  '[SafeGPU] SKIP guest rasterizer binding',
+                                  'Safe GPU is enabled',
+                                  'Experimental Windows 7 compatible rendering mode')) {
               if (!$strings.Contains($required)) { throw "Required marker missing: $required" }
           }
           foreach ($forbidden in @('Windows 7 NVIDIA sampler workaround',
@@ -178,35 +183,48 @@ jobs:
           }
 
           @"
-          shadPS4 Windows 7 pipeline-forensics diagnostic build
+          shadPS4 Windows 7 SafeGPU milestone 0: NullGPU parity
 
-          This build restores normal renderer behavior after the completed experimental axes.
-          It records each legacy NVIDIA Vulkan 1.2 graphics-pipeline creation attempt under:
+          GPU modes in this single executable:
 
-            user\shader\pipeline_forensics\run_*\
+            null_gpu=true,  safe_gpu=false -> original NullGPU (takes precedence)
+            null_gpu=false, safe_gpu=true  -> SafeGPU milestone 0
+            null_gpu=false, safe_gpu=false -> original full Vulkan renderer
 
-          For the minimal diagnostic test, run Bloodborne once and We Are Doomed once with
-          null_gpu=false. Return both the normal test-results archive and the complete
-          user\shader\pipeline_forensics folder. A pipeline report with status=started but no
-          later status=success identifies the call where the driver stopped.
-          "@ | Out-File -Encoding ascii (Join-Path $output 'PIPELINE-FORENSICS-README.txt')
+          SafeGPU milestone 0 intentionally leaves Liverpool unbound from guest Vulkan rendering.
+          It should match the useful game-progress behavior of NullGPU while remaining a separate,
+          default-off mode. It does not allow partial guest graphics yet.
 
+          Test in this order: We Are Doomed, Wipeout Omega, Bloodborne, DOAX3 Fortune, Driveclub.
+          Test NullGPU, SafeGPU, and full Vulkan as separate runs and return the automatic
+          test-results folders. Pipeline forensics remains available in full Vulkan mode.
+          "@ | Out-File -Encoding ascii (Join-Path $output 'SAFEGPU-MILESTONE-0.txt')
+
+          $buildDate = (Get-Date).ToUniversalTime().ToString('o')
           @"
-          lineage=clean-upstream-7fb1a530
-          upstream_commit=7fb1a530c15415097836521fec6f3483e27c81ae
-          phase=windows7-vulkan-pipeline-diagnostics
-          single_axis=graphics-pipeline-forensics-capture
-          renderer_behavior_change=false
-          previous_pipeline_optimization_experiment=reverted
-          emulator_toolchain=clang-cl-msvc-ucrt
-          emulator_target=x86_64-pc-windows-msvc
-          launcher_toolchain=llvm-mingw-20260616-msvcrt-x86_64-static
-          cpu=x86-64-v3
-          null_gpu_default=false
-          show_splash_default=true
-          show_fps_counter_default=true
-          vulkan_compat_scope=presenter-and-guest-rendering
-          vulkan_guest_compat_patches=true
+          Repository: $env:GITHUB_REPOSITORY
+          Branch: $env:GITHUB_REF_NAME
+          Baseline: 8ecd4e46e2e6df36901940bed05785665fa5474c
+          Iteration: 00
+          Experiment: null-parity
+          Commit: $env:GITHUB_SHA
+          Workflow: $env:GITHUB_WORKFLOW
+          Workflow Run ID: $env:GITHUB_RUN_ID
+          Workflow Run Number: $env:GITHUB_RUN_NUMBER
+          Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
+          Build Date: $buildDate
+          SafeGPU: available; default=false; milestone 0 skips all guest rendering
+          NullGPU: original behavior preserved; takes precedence over SafeGPU
+          Notes: Repository rename deferred by user; full Vulkan and pipeline forensics preserved
+          Compiler: clang-cl (MSVC/UCRT target)
+          Build Type: Release
+          Windows target: Windows 7 x64 (6.1)
+          Vulkan target: Vulkan 1.2 compatibility
+          SafeGPU policy revision: milestone-0-null-parity-v1
+          Allowed graphics classes: none
+          Allowed pipeline hashes: none
+          Blocked pipeline hashes: all guest graphics pipelines
+          Compute state: skipped by unbound guest rasterizer
           "@ | Out-File -Encoding ascii (Join-Path $output 'BUILD-IDENTITY.txt')
 
           $hashLines = @(Get-ChildItem $output -File |
@@ -217,10 +235,10 @@ jobs:
               } | Sort-Object)
           $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
 
-      - name: Upload Windows 7 V1 pipeline-forensics artifact
+      - name: Upload Windows 7 SafeGPU null-parity artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shadps4-win7-v1-pipeline-forensics-${{ github.sha }}
+          name: shadps4-win7-safe-gpu-00-null-parity
           path: artifact/
           if-no-files-found: error
           retention-days: 30

@@ -432,6 +432,7 @@ struct GPUSettings {
     Setting<u32> internal_screen_width{1280};
     Setting<u32> internal_screen_height{720};
     Setting<bool> null_gpu{false};
+    Setting<bool> safe_gpu{false};
     Setting<bool> copy_gpu_buffers{false};
     Setting<u32> readbacks_mode{GpuReadbacksMode::Disabled};
     Setting<bool> readback_linear_images_enabled{false};
@@ -450,6 +451,7 @@ struct GPUSettings {
     std::vector<OverrideItem> GetOverrideableFields() const {
         return std::vector<OverrideItem>{
             make_override<GPUSettings>("null_gpu", &GPUSettings::null_gpu),
+            make_override<GPUSettings>("safe_gpu", &GPUSettings::safe_gpu),
             make_override<GPUSettings>("copy_gpu_buffers", &GPUSettings::copy_gpu_buffers),
             make_override<GPUSettings>("full_screen", &GPUSettings::full_screen),
             make_override<GPUSettings>("full_screen_mode", &GPUSettings::full_screen_mode),
@@ -472,7 +474,7 @@ struct GPUSettings {
     }
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GPUSettings, window_width, window_height, internal_screen_width,
-                                   internal_screen_height, null_gpu, copy_gpu_buffers,
+                                   internal_screen_height, null_gpu, safe_gpu, copy_gpu_buffers,
                                    readbacks_mode, readback_linear_images_enabled,
                                    direct_memory_access_enabled, dump_shaders, patch_shaders,
                                    vblank_frequency, full_screen, full_screen_mode, present_mode,
@@ -738,6 +740,7 @@ public:
 
     // GPU Settings
     SETTING_FORWARD_BOOL(m_gpu, NullGPU, null_gpu)
+    SETTING_FORWARD_BOOL(m_gpu, SafeGPU, safe_gpu)
     SETTING_FORWARD_BOOL(m_gpu, DumpShaders, dump_shaders)
     SETTING_FORWARD_BOOL(m_gpu, CopyGpuBuffers, copy_gpu_buffers)
     SETTING_FORWARD_BOOL(m_gpu, FullScreen, full_screen)

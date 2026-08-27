@@ -1011,6 +1011,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame) {
 
                 if (EmulatorSettings.IsNullGPU()) {
                     Core::Devtools::Layer::DrawNullGpuNotice();
+                } else if (EmulatorSettings.IsSafeGPU()) {
+                    Core::Devtools::Layer::DrawSafeGpuNotice();
                 }
             }
             ImGui::End();
