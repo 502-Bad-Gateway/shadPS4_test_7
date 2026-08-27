@@ -1,4 +1,4 @@
-name: Apply SafeGPU Build 04 whitelist blending
+name: Apply SafeGPU Build 04 source only
 
 on:
   push:
@@ -19,12 +19,74 @@ jobs:
           ref: shadps4_clone
           fetch-depth: 0
 
-      - name: Apply Build 04 source and workflow changes
+      - name: Apply Build 04 source changes
         shell: bash
         run: |
-          python -c "import base64; exec(base64.b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpkZWYgcmVwbGFjZV9vbmNlKHBhdGgsIG9sZCwgbmV3KToKICAgIHAgPSBQYXRoKHBhdGgpCiAgICB0ZXh0ID0gcC5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04IikKICAgIGNvdW50ID0gdGV4dC5jb3VudChvbGQpCiAgICBpZiBjb3VudCAhPSAxOgogICAgICAgIHJhaXNlIFJ1bnRpbWVFcnJvcihmIntwYXRofTogZXhwZWN0ZWQgb25lIG1hdGNoIGZvciB7b2xkIXJ9LCBmb3VuZCB7Y291bnR9IikKICAgIHAud3JpdGVfdGV4dCh0ZXh0LnJlcGxhY2Uob2xkLCBuZXcsIDEpLCBlbmNvZGluZz0idXRmLTgiKQoKZGVmIHJlcGxhY2VfYWxsX2NoZWNrZWQocGF0aCwgb2xkLCBuZXcsIGV4cGVjdGVkX21pbj0xKToKICAgIHAgPSBQYXRoKHBhdGgpCiAgICB0ZXh0ID0gcC5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04IikKICAgIGNvdW50ID0gdGV4dC5jb3VudChvbGQpCiAgICBpZiBjb3VudCA8IGV4cGVjdGVkX21pbjoKICAgICAgICByYWlzZSBSdW50aW1lRXJyb3IoZiJ7cGF0aH06IGV4cGVjdGVkIGF0IGxlYXN0IHtleHBlY3RlZF9taW59IG1hdGNoZXMgZm9yIHtvbGQhcn0sIGZvdW5kIHtjb3VudH0iKQogICAgcC53cml0ZV90ZXh0KHRleHQucmVwbGFjZShvbGQsIG5ldyksIGVuY29kaW5nPSJ1dGYtOCIpCiAgICByZXR1cm4gY291bnQKCiMgQnVpbGQgMDQga2VlcHMgdGhlIGV4YWN0IEJ1aWxkIDAzIGhhc2ggd2hpdGVsaXN0IGFuZCBvbmx5IHJlbGF4ZXMgdGhlCiMgYmFzaWMgZmVhdHVyZSBjbGFzc2lmaWVyIHRvIHBlcm1pdCB0aGUgYmxlbmRpbmcgc3RhdGUgYWxyZWFkeSBwcm92ZW4gdG8KIyB3b3JrIGluIGZ1bGwtR1BVIFdlIEFyZSBEb29tZWQgb24gdGhlIHRhcmdldCBXaW5kb3dzIDcvTlZJRElBIHNldHVwLgpyZXBsYWNlX2FsbF9jaGVja2VkKAogICAgInNyYy92aWRlb19jb3JlL3NhZmVfZ3B1L3NhZmVfZ3B1LmNwcCIsCiAgICAiSXNCdWlsZDAzR3JhcGhpY3NQaXBlbGluZVdoaXRlbGlzdGVkIiwKICAgICJJc0J1aWxkMDRHcmFwaGljc1BpcGVsaW5lV2hpdGVsaXN0ZWQiLAogICAgMiwKKQpyZXBsYWNlX29uY2UoCiAgICAic3JjL3ZpZGVvX2NvcmUvc2FmZV9ncHUvc2FmZV9ncHUuY3BwIiwKICAgICIvLyB0byBjb21wbGV0ZSBvbiB0aGUgdGFyZ2V0IFdpbmRvd3MgNyAvIE5WSURJQSBzZXR1cC4gQnVpbGQgMDMgYWRtaXRzIG5vdGhpbmcgZWxzZS4iLAogICAgIi8vIHRvIGNvbXBsZXRlIG9uIHRoZSB0YXJnZXQgV2luZG93cyA3IC8gTlZJRElBIHNldHVwLiBCdWlsZCAwNCBhZG1pdHMgbm90aGluZyBlbHNlLiIsCikKcmVwbGFjZV9vbmNlKAogICAgInNyYy92aWRlb19jb3JlL3NhZmVfZ3B1L3NhZmVfZ3B1LmNwcCIsCiAgICAiICAgIC8vIEJ1aWxkIDAzIGZlYXR1cmUgZ2F0ZTogYWxsb3cgb25seSBhIGJhc2ljIHZlcnRleC9mcmFnbWVudCwgc2luZ2xlLXRhcmdldCxcbiIKICAgICIgICAgLy8gc2luZ2xlLXNhbXBsZSBjb2xvciBwaXBlbGluZS4gQ29tcHV0ZSBhbmQgY29tcGxleCBhdHRhY2htZW50L3NoYWRlciBwYXRocyByZW1haW5cbiIKICAgICIgICAgLy8gb3V0c2lkZSB0aGlzIGFsbG93LWxpc3QgYW5kIHRoZXJlZm9yZSBmYWlsIGNsb3NlZC5cbiIKICAgICIgICAgcmV0dXJuIGluZm8uaGFzX3ZlcnRleF9zaGFkZXIgJiYgaW5mby5oYXNfZnJhZ21lbnRfc2hhZGVyICYmICFpbmZvLmhhc190ZXNzZWxsYXRpb25fc2hhZGVyICYmXG4iCiAgICAiICAgICAgICAgICAhaW5mby5oYXNfZ2VvbWV0cnlfc2hhZGVyICYmICFpbmZvLmhhc19zdG9yYWdlX2ltYWdlcyAmJiAhaW5mby5oYXNfZGVwdGhfb3Jfc3RlbmNpbCAmJlxuIgogICAgIiAgICAgICAgICAgIWluZm8uaGFzX2JsZW5kaW5nICYmICFpbmZvLmhhc19sb2dpY19vcCAmJiBpbmZvLm51bV9jb2xvcl9hdHRhY2htZW50cyA9PSAxICYmXG4iCiAgICAiICAgICAgICAgICBpbmZvLm1ydF9tYXNrID09IDEgJiYgaW5mby5udW1fc2FtcGxlcyA9PSAxICYmIGluZm8uZGVwdGhfc2FtcGxlcyA9PSAxOyIsCiAgICAiICAgIC8vIEJ1aWxkIDA0IGZlYXR1cmUgZ2F0ZToga2VlcCB0aGUgc2FtZSBiYXNpYyB2ZXJ0ZXgvZnJhZ21lbnQsIHNpbmdsZS10YXJnZXQsXG4iCiAgICAiICAgIC8vIHNpbmdsZS1zYW1wbGUgY29sb3Igc3Vic2V0IGFzIEJ1aWxkIDAzLCBidXQgcGVybWl0IGJsZW5kaW5nIGZvciB0aGUgdGhyZWUgZXhwbGljaXRcbiIKICAgICIgICAgLy8ga25vd24tc2FmZSBoYXNoZXMuIENvbXB1dGUgYW5kIGFsbCBvdGhlciBjb21wbGV4IHBhdGhzIHJlbWFpbiBmYWlsLWNsb3NlZC5cbiIKICAgICIgICAgcmV0dXJuIGluZm8uaGFzX3ZlcnRleF9zaGFkZXIgJiYgaW5mby5oYXNfZnJhZ21lbnRfc2hhZGVyICYmICFpbmZvLmhhc190ZXNzZWxsYXRpb25fc2hhZGVyICYmXG4iCiAgICAiICAgICAgICAgICAhaW5mby5oYXNfZ2VvbWV0cnlfc2hhZGVyICYmICFpbmZvLmhhc19zdG9yYWdlX2ltYWdlcyAmJiAhaW5mby5oYXNfZGVwdGhfb3Jfc3RlbmNpbCAmJlxuIgogICAgIiAgICAgICAgICAgIWluZm8uaGFzX2xvZ2ljX29wICYmIGluZm8ubnVtX2NvbG9yX2F0dGFjaG1lbnRzID09IDEgJiYgaW5mby5tcnRfbWFzayA9PSAxICYmXG4iCiAgICAiICAgICAgICAgICBpbmZvLm51bV9zYW1wbGVzID09IDEgJiYgaW5mby5kZXB0aF9zYW1wbGVzID09IDE7IiwKKQoKcmVwbGFjZV9vbmNlKAogICAgInNyYy92aWRlb19jb3JlL3NhZmVfZ3B1L3NhZmVfZ3B1LmgiLAogICAgIi8vIEJ1aWxkIDAzIHJlcXVpcmVzIGFuIGV4cGxpY2l0IGtub3duLXNhZmUgcGlwZWxpbmUgaGFzaCBhbmQgdGhlIGNvbnNlcnZhdGl2ZSBiYXNpYy1mZWF0dXJlXG4iCiAgICAiLy8gY2xhc3NpZmllciBiZWZvcmUgYSBndWVzdCBncmFwaGljcyBwaXBlbGluZSBtYXkgcmVhY2ggVnVsa2FuIHBpcGVsaW5lIGNyZWF0aW9uLiIsCiAgICAiLy8gQnVpbGQgMDQgcmVxdWlyZXMgYW4gZXhwbGljaXQga25vd24tc2FmZSBwaXBlbGluZSBoYXNoIGFuZCB0aGUgY29uc2VydmF0aXZlIGJhc2ljLWZlYXR1cmVcbiIKICAgICIvLyBjbGFzc2lmaWVyLCBub3cgcGVybWl0dGluZyBibGVuZGluZyBmb3IgdGhvc2UgaGFzaGVzLCBiZWZvcmUgVnVsa2FuIHBpcGVsaW5lIGNyZWF0aW9uLiIsCikKcmVwbGFjZV9vbmNlKAogICAgInNyYy92aWRlb19jb3JlL3NhZmVfZ3B1L3NhZmVfZ3B1LmgiLAogICAgJyAgICAgICAgcmV0dXJuICJtaWxlc3RvbmUtMi1waXBlbGluZS13aGl0ZWxpc3QtdjEiOycsCiAgICAnICAgICAgICByZXR1cm4gIm1pbGVzdG9uZS0yLXBpcGVsaW5lLXdoaXRlbGlzdC1ibGVuZGluZy12MSI7JywKKQoKIyBUaGUgYWN0dWFsIHByZS1kcml2ZXIgZ2F0ZXMgZG8gbm90IGNoYW5nZSBsb2NhdGlvbi4gUmVuYW1lIGRpYWdub3N0aWMgbGFiZWxzCiMgc28gQnVpbGQgMDQgdGVzdC1yZXN1bHRzIGFyZSB1bmFtYmlndW91cy4KcmVwbGFjZV9hbGxfY2hlY2tlZCgKICAgICJzcmMvdmlkZW9fY29yZS9yZW5kZXJlcl92dWxrYW4vdmtfcGlwZWxpbmVfY2FjaGUuY3BwIiwKICAgICJCdWlsZCAwMyIsCiAgICAiQnVpbGQgMDQiLAogICAgNCwKKQoKIyBVbml0IGNvdmVyYWdlOiBibGVuZGluZyBpcyB0aGUgb25lIG5ld2x5IGFkbWl0dGVkIGZlYXR1cmU7IG90aGVyIGNvbXBsZXgKIyBmZWF0dXJlcyByZW1haW4gZGVuaWVkLgpyZXBsYWNlX29uY2UoCiAgICAidGVzdHMvdGVzdF9zYWZlX2dwdS5jcHAiLAogICAgIiAgICBFWFBFQ1RfRkFMU0UoVmlkZW9Db3JlOjpTYWZlR3B1R2F0ZTo6U2hvdWxkQWxsb3dHcmFwaGljc1BpcGVsaW5lSGFzaCgweDBVTEwpKTtcblxuIgogICAgIiAgICBiYXNpYy5oYXNfc3RvcmFnZV9pbWFnZXMgPSB0cnVlOyIsCiAgICAiICAgIEVYUEVDVF9GQUxTRShWaWRlb0NvcmU6OlNhZmVHcHVHYXRlOjpTaG91bGRBbGxvd0dyYXBoaWNzUGlwZWxpbmVIYXNoKDB4MFVMTCkpO1xuXG4iCiAgICAiICAgIGJhc2ljLmhhc19ibGVuZGluZyA9IHRydWU7XG4iCiAgICAiICAgIEVYUEVDVF9UUlVFKFZpZGVvQ29yZTo6U2FmZUdwdUdhdGU6OlNob3VsZEFsbG93R3JhcGhpY3NQaXBlbGluZShiYXNpYykpO1xuIgogICAgIiAgICBiYXNpYy5oYXNfbG9naWNfb3AgPSB0cnVlO1xuIgogICAgIiAgICBFWFBFQ1RfRkFMU0UoVmlkZW9Db3JlOjpTYWZlR3B1R2F0ZTo6U2hvdWxkQWxsb3dHcmFwaGljc1BpcGVsaW5lKGJhc2ljKSk7XG4iCiAgICAiICAgIGJhc2ljLmhhc19sb2dpY19vcCA9IGZhbHNlO1xuIgogICAgIiAgICBiYXNpYy5oYXNfYmxlbmRpbmcgPSBmYWxzZTtcblxuIgogICAgIiAgICBiYXNpYy5oYXNfc3RvcmFnZV9pbWFnZXMgPSB0cnVlOyIsCikKCiMgQnVpbGQgaWRlbnRpdHkgLyBhcnRpZmFjdCBuYW1pbmcuCnJlcGxhY2Vfb25jZSgKICAgICIuZ2l0aHViL3dvcmtmbG93cy93b3JrZmxvd19zaGFkcHM0X2Nsb25lLnltbCIsCiAgICAnICBFWFBFUklNRU5UX0lURVJBVElPTjogIjAzIicsCiAgICAnICBFWFBFUklNRU5UX0lURVJBVElPTjogIjA0IicsCikKcmVwbGFjZV9vbmNlKAogICAgIi5naXRodWIvd29ya2Zsb3dzL3dvcmtmbG93X3NoYWRwczRfY2xvbmUueW1sIiwKICAgICcgIEVYUEVSSU1FTlRfTkFNRTogInBpcGVsaW5lLXdoaXRlbGlzdCInLAogICAgJyAgRVhQRVJJTUVOVF9OQU1FOiAicGlwZWxpbmUtd2hpdGVsaXN0LWJsZW5kaW5nIicsCikKcmVwbGFjZV9hbGxfY2hlY2tlZCgKICAgICIuZ2l0aHViL3dvcmtmbG93cy93b3JrZmxvd19zaGFkcHM0X2Nsb25lLnltbCIsCiAgICAiQnVpbGQgMDMiLAogICAgIkJ1aWxkIDA0IiwKICAgIDIsCikKcmVwbGFjZV9vbmNlKAogICAgIi5naXRodWIvd29ya2Zsb3dzL3dvcmtmbG93X3NoYWRwczRfY2xvbmUueW1sIiwKICAgICIgICAgICAgICAgTm90ZXM6IGV4cGxpY2l0IGtub3duLXNhZmUgaGFzaGVzIG9ubHk7IHZlcnRleCtmcmFnbWVudCBvbmx5OyBvbmUgc2luZ2xlLXNhbXBsZSBjb2xvciB0YXJnZXQ7IG5vIGRlcHRoL3N0ZW5jaWwsIGJsZW5kaW5nLCBsb2dpYy1vcCwgdGVzc2VsbGF0aW9uLCBnZW9tZXRyeSwgc3RvcmFnZSBpbWFnZXMsIG9yIFNhZmVHUFUgcGlwZWxpbmUtY2FjaGUgd2FybS11cCIsCiAgICAiICAgICAgICAgIE5vdGVzOiBzYW1lIHRocmVlIGtub3duLXNhZmUgaGFzaGVzIGFzIEJ1aWxkIDAzOyBibGVuZGluZyBwZXJtaXR0ZWQgb25seSBmb3Igd2hpdGVsaXN0ZWQgcGlwZWxpbmVzOyB2ZXJ0ZXgrZnJhZ21lbnQgb25seTsgb25lIHNpbmdsZS1zYW1wbGUgY29sb3IgdGFyZ2V0OyBubyBkZXB0aC9zdGVuY2lsLCBsb2dpYy1vcCwgdGVzc2VsbGF0aW9uLCBnZW9tZXRyeSwgc3RvcmFnZSBpbWFnZXMsIG9yIFNhZmVHUFUgcGlwZWxpbmUtY2FjaGUgd2FybS11cCIsCikK'))"
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Commit Build 04
+          def edit(path, fn):
+              p = Path(path)
+              old = p.read_text(encoding='utf-8')
+              new = fn(old)
+              if new == old:
+                  raise RuntimeError(f'{path}: expected change was not applied')
+              p.write_text(new, encoding='utf-8')
+
+          def safe_cpp(text):
+              if text.count('IsBuild03GraphicsPipelineWhitelisted') != 2:
+                  raise RuntimeError('unexpected Build 03 whitelist symbol count')
+              text = text.replace('IsBuild03GraphicsPipelineWhitelisted',
+                                  'IsBuild04GraphicsPipelineWhitelisted')
+              text = text.replace('Build 03 admits nothing else.', 'Build 04 admits nothing else.')
+              old = ('           !info.has_geometry_shader && !info.has_storage_images && '
+                     '!info.has_depth_or_stencil &&\n'
+                     '           !info.has_blending && !info.has_logic_op && '
+                     'info.num_color_attachments == 1 &&\n')
+              new = ('           !info.has_geometry_shader && !info.has_storage_images && '
+                     '!info.has_depth_or_stencil &&\n'
+                     '           !info.has_logic_op && info.num_color_attachments == 1 &&\n')
+              if old not in text:
+                  raise RuntimeError('Build 03 blending gate not found')
+              text = text.replace(old, new, 1)
+              text = text.replace('Build 03 feature gate:', 'Build 04 feature gate:', 1)
+              return text
+
+          def safe_h(text):
+              text = text.replace('Build 03 requires', 'Build 04 requires', 1)
+              text = text.replace('milestone-2-pipeline-whitelist-v1',
+                                  'milestone-2-pipeline-whitelist-blending-v1', 1)
+              return text
+
+          def pipeline_cache(text):
+              count = text.count('Build 03')
+              if count < 4:
+                  raise RuntimeError(f'unexpected Build 03 log count: {count}')
+              return text.replace('Build 03', 'Build 04')
+
+          def tests(text):
+              marker = ('    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x0ULL));\n\n'
+                        '    basic.has_storage_images = true;')
+              insert = ('    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(0x0ULL));\n\n'
+                        '    // Build 04: blending is permitted after the explicit hash whitelist.\n'
+                        '    basic.has_blending = true;\n'
+                        '    EXPECT_TRUE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));\n'
+                        '    basic.has_logic_op = true;\n'
+                        '    EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));\n'
+                        '    basic.has_logic_op = false;\n'
+                        '    basic.has_blending = false;\n\n'
+                        '    basic.has_storage_images = true;')
+              if marker not in text:
+                  raise RuntimeError('SafeGPU test insertion point not found')
+              return text.replace(marker, insert, 1)
+
+          edit('src/video_core/safe_gpu/safe_gpu.cpp', safe_cpp)
+          edit('src/video_core/safe_gpu/safe_gpu.h', safe_h)
+          edit('src/video_core/renderer_vulkan/vk_pipeline_cache.cpp', pipeline_cache)
+          edit('tests/test_safe_gpu.cpp', tests)
+          PY
+
+      - name: Commit Build 04 source
         shell: bash
         run: |
           git diff --check
@@ -33,7 +95,6 @@ jobs:
           git add -- src/video_core/safe_gpu/safe_gpu.cpp \
                      src/video_core/safe_gpu/safe_gpu.h \
                      src/video_core/renderer_vulkan/vk_pipeline_cache.cpp \
-                     tests/test_safe_gpu.cpp \
-                     .github/workflows/workflow_shadps4_clone.yml
-          git commit -m "Add SafeGPU Build 04 whitelist blending"
+                     tests/test_safe_gpu.cpp
+          git commit -m "Add SafeGPU Build 04 whitelist blending [skip ci]"
           git push origin HEAD:shadps4_clone
