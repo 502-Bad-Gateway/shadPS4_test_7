@@ -2,7 +2,7 @@ name: workflow_shadps4_clone
 
 on:
   push:
-    branches: [shadps4_clone]
+    branches: [shadps4_clone_build06]
     paths:
       - CMakeLists.txt
       - src/**
@@ -16,13 +16,13 @@ permissions:
   contents: read
 
 env:
-  EXPERIMENT_ITERATION: "04"
-  EXPERIMENT_NAME: "pipeline-whitelist-blending"
+  EXPERIMENT_ITERATION: "06"
+  EXPERIMENT_NAME: "flat-geometry"
   ARTIFACT_BRANCH: "shadps4_clone"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 SafeGPU Build 04
+    name: Build Windows 7 x64 SafeGPU Build 06
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -107,7 +107,7 @@ jobs:
           Repository: $env:GITHUB_REPOSITORY
           Branch: $env:GITHUB_REF_NAME
           Baseline: 8ecd4e46e2e6df36901940bed05785665fa5474c
-          Base Commit: 8ecd4e46e2e6df36901940bed05785665fa5474c
+          Base Commit: 145e0d74283a287f4f6c0aa609f7528d52f47a47
           Iteration: $env:EXPERIMENT_ITERATION
           Experiment: $env:EXPERIMENT_NAME
           Commit: $env:GITHUB_SHA
@@ -117,10 +117,10 @@ jobs:
           Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
           Build Date: $buildDate
           Artifact: W7-$env:ARTIFACT_BRANCH-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
-          SafeGPU: milestone-2 Build 04 same explicit pipeline whitelist with blending admitted
+          SafeGPU: Build 06 flat-color geometry experiment from proven Build 04
           NullGPU: preserved and takes precedence
           Compute: skipped in SafeGPU before compute shader/pipeline creation
-          Notes: same three known-safe hashes as Build 03; blending permitted only after the explicit whitelist; vertex+fragment only; one single-sample color target; no depth/stencil, logic-op, tessellation, geometry, storage images, or SafeGPU pipeline-cache warm-up
+          Notes: three Build 04 We Are Doomed control hashes remain native; new candidates require VS+FS, one 1x color target, active depth and no stencil test; guest fragment module is replaced with a constant-color fragment shader; geometry/tessellation stages, storage images, logic-op, compute, and SafeGPU pipeline-cache warm-up remain blocked
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 
       - name: Upload artifact
