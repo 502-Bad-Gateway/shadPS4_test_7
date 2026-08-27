@@ -1,0 +1,48 @@
+name: Apply Win7 external GPU base
+
+on:
+  push:
+    branches: [PS4_external_base]
+    paths:
+      - .github/scripts/apply-win7-external-gpu-base.py
+      - .github/workflows/apply-win7-external-gpu-base.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: PS4_external_base
+
+      - name: Apply guarded external GPU source patch
+        run: python3 .github/scripts/apply-win7-external-gpu-base.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          git status --short
+
+      - name: Commit patched source
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No source changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt \
+                  src/video_core/renderer_vulkan/vk_instance.cpp \
+                  src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp \
+                  src/video_core/renderer_vulkan/win7_external_gpu.cpp \
+                  src/video_core/renderer_vulkan/win7_external_gpu.h \
+                  src/video_core/renderer_vulkan/win7_external_gpu_api.h \
+                  src/video_core/renderer_vulkan/win7_external_gpu_plugin.cpp
+          git commit -m "video_core: add external Win7 GPU policy DLL base"
+          git push origin HEAD:PS4_external_base
