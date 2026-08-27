@@ -93,7 +93,7 @@ TEST_F(SafeGpuPolicyTest, MilestoneTwoGraphicsAllowListFailsClosed) {
     basic.has_storage_images = true;
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
     basic.has_storage_images = false;
-    basic.has_depth_or_stencil = true;
+    basic.has_depth = true;
     EXPECT_FALSE(VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(basic));
 
     settings->SetSafeGPU(false);

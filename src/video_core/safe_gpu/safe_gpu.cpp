@@ -15,9 +15,9 @@ bool IsSimpleDwordRange(const std::uint64_t address, const std::uint32_t num_byt
            address <= std::numeric_limits<std::uint64_t>::max() - num_bytes;
 }
 
-bool IsBuild04GraphicsPipelineWhitelisted(const std::uint64_t pipeline_hash) noexcept {
+bool IsKnownControlGraphicsPipelineHashImpl(const std::uint64_t pipeline_hash) noexcept {
     // These three graphics pipelines are taken from a full-GPU We Are Doomed run that is known
-    // to complete on the target Windows 7 / NVIDIA setup. Build 04 admits nothing else.
+    // to complete on the target Windows 7 / NVIDIA setup. These remain the native-rendering control hashes.
     switch (pipeline_hash) {
     case 0x8202f0d30159f803ULL:
     case 0x762f3099a689a76fULL:
@@ -64,13 +64,24 @@ bool SafeGpuGate::ShouldAllowGraphics() noexcept {
     return GetEffectiveMode() != EffectiveGpuMode::NullGPU;
 }
 
-bool SafeGpuGate::ShouldAllowGraphicsPipelineHash(const std::uint64_t pipeline_hash) noexcept {
+bool SafeGpuGate::ShouldAllowGraphicsPipelineHash(
+    const std::uint64_t pipeline_hash) noexcept {
     const auto mode = GetEffectiveMode();
     if (mode == EffectiveGpuMode::FullGPU) {
         return true;
     }
-    return mode == EffectiveGpuMode::SafeGPU &&
-           IsBuild04GraphicsPipelineWhitelisted(pipeline_hash);
+    // Builds 05-07 use the structural classifier as the fail-closed boundary.
+    // A zero hash is still rejected as invalid/unclassified input.
+    return mode == EffectiveGpuMode::SafeGPU && pipeline_hash != 0;
+}
+
+bool SafeGpuGate::IsKnownControlGraphicsPipelineHash(
+    const std::uint64_t pipeline_hash) noexcept {
+    return IsKnownControlGraphicsPipelineHashImpl(pipeline_hash);
+}
+
+bool SafeGpuGate::ShouldUseFlatFragment(const std::uint64_t pipeline_hash) noexcept {
+    return GetEffectiveMode() == EffectiveGpuMode::SafeGPU && false;
 }
 
 bool SafeGpuGate::ShouldAllowGraphicsPipeline(
@@ -83,13 +94,24 @@ bool SafeGpuGate::ShouldAllowGraphicsPipeline(
         return false;
     }
 
-    // Build 04 feature gate: allow only a basic vertex/fragment, single-target,
-    // single-sample color pipeline. Compute and complex attachment/shader paths remain
-    // outside this allow-list and therefore fail closed.
-    return info.has_vertex_shader && info.has_fragment_shader && !info.has_tessellation_shader &&
-           !info.has_geometry_shader && !info.has_storage_images && !info.has_depth_or_stencil &&
-           !info.has_logic_op && info.num_color_attachments == 1 &&
-           info.mrt_mask == 1 && info.num_samples == 1 && info.depth_samples == 1;
+    const bool common_simple =
+        info.has_vertex_shader && info.has_fragment_shader &&
+        !info.has_tessellation_shader && !info.has_geometry_shader &&
+        !info.has_storage_images && !info.has_logic_op &&
+        info.num_color_attachments == 1 && info.mrt_mask == 1 &&
+        info.num_samples == 1 && info.depth_samples == 1;
+    if (!common_simple) {
+        return false;
+    }
+
+    // Preserve the three Build 04 We Are Doomed pipelines as a native-rendering
+    // control island in every experiment.
+    if (IsKnownControlGraphicsPipelineHashImpl(info.pipeline_hash)) {
+        return !info.has_depth && !info.has_stencil;
+    }
+
+    // Build 07: native depth geometry that uses sampled images/samplers.
+    return info.has_depth && !info.has_stencil && info.has_sampled_resources;
 }
 
 bool SafeGpuGate::ShouldAllowCompute() noexcept {

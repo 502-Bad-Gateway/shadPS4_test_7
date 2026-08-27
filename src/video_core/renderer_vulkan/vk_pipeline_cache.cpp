@@ -320,7 +320,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
 #endif
     if (VideoCore::SafeGpuGate::IsEnabled()) {
         LOG_INFO(Render_Vulkan,
-                 "[SafeGPU] SKIP pipeline cache warm-up for Build 04; cached graphics/compute "
+                 "[SafeGPU] SKIP pipeline cache warm-up for Build 07; cached graphics/compute "
                  "pipelines must not bypass the fail-closed policy");
     } else {
         WarmUp();
@@ -434,7 +434,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
         if (VideoCore::SafeGpuGate::IsEnabled() &&
             !VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(pipeline_hash)) {
             LOG_INFO(Render_Vulkan,
-                     "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 04 explicit whitelist "
+                     "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 07 candidate prefilter "
                      "before vkCreateGraphicsPipelines",
                      pipeline_hash);
             infos.fill(nullptr);
@@ -454,27 +454,34 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
                 has_blending |= graphics_key.blend_controls[index].enable != 0;
             }
 
-            const VideoCore::SafeGpuGraphicsPipelineInfo safe_info{
-                .has_vertex_shader = vs != nullptr,
-                .has_fragment_shader = fs != nullptr,
-                .has_tessellation_shader = tcs != nullptr || tes != nullptr,
-                .has_geometry_shader = gs != nullptr,
-                .has_storage_images =
-                    (vs && vs->has_storage_images) || (fs && fs->has_storage_images),
-                .has_depth_or_stencil =
-                    liverpool->regs.depth_buffer.DepthValid() ||
-                    liverpool->regs.depth_buffer.StencilValid(),
-                .has_blending = has_blending,
-                .has_logic_op = graphics_key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,
-                .num_color_attachments = graphics_key.num_color_attachments,
-                .mrt_mask = graphics_key.mrt_mask,
-                .num_samples = graphics_key.num_samples,
-                .depth_samples = graphics_key.depth_samples,
-            };
+            const auto has_sampled_resources = [](const Shader::Info* info) {
+        return info && (!info->images.empty() || !info->samplers.empty());
+    };
+    const VideoCore::SafeGpuGraphicsPipelineInfo safe_info{
+        .has_vertex_shader = vs != nullptr,
+        .has_fragment_shader = fs != nullptr,
+        .has_tessellation_shader = tcs != nullptr || tes != nullptr,
+        .has_geometry_shader = gs != nullptr,
+        .has_storage_images =
+            (vs && vs->has_storage_images) || (fs && fs->has_storage_images),
+        .has_depth = liverpool->regs.depth_buffer.DepthValid() &&
+                     liverpool->regs.depth_control.depth_enable != 0,
+        .has_stencil = liverpool->regs.depth_control.stencil_enable != 0,
+        .has_sampled_resources =
+            has_sampled_resources(vs) || has_sampled_resources(fs),
+        .has_blending = has_blending,
+        .has_logic_op =
+            graphics_key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,
+        .pipeline_hash = pipeline_hash,
+        .num_color_attachments = graphics_key.num_color_attachments,
+        .mrt_mask = graphics_key.mrt_mask,
+        .num_samples = graphics_key.num_samples,
+        .depth_samples = graphics_key.depth_samples,
+    };
             if (!VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(safe_info)) {
                 LOG_INFO(Render_Vulkan,
-                         "[SafeGPU] SKIP whitelisted graphics pipeline hash={:#x}; "
-                         "Build 04 basic feature gate rejected it before "
+                         "[SafeGPU] SKIP candidate graphics pipeline hash={:#x}; "
+                         "Build 07 geometry-first feature gate rejected it before "
                          "vkCreateGraphicsPipelines",
                          pipeline_hash);
                 infos.fill(nullptr);
@@ -483,8 +490,8 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
                 return nullptr;
             }
             LOG_INFO(Render_Vulkan,
-                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 04 explicit whitelist "
-                     "and basic feature gate before vkCreateGraphicsPipelines",
+                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 07 candidate prefilter "
+                     "and geometry-first feature gate before vkCreateGraphicsPipelines",
                      pipeline_hash);
         }
         LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
@@ -523,7 +530,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
 const ComputePipeline* PipelineCache::GetComputePipeline() {
     if (VideoCore::SafeGpuGate::IsEnabled()) {
         LOG_INFO(Render_Vulkan,
-                 "[SafeGPU] SKIP compute pipeline before shader/pipeline creation by Build 04 policy");
+                 "[SafeGPU] SKIP compute pipeline before shader/pipeline creation by Build 07 policy");
         return nullptr;
     }
     if (!RefreshComputeKey()) {

@@ -20,9 +20,12 @@ struct SafeGpuGraphicsPipelineInfo {
     bool has_tessellation_shader{};
     bool has_geometry_shader{};
     bool has_storage_images{};
-    bool has_depth_or_stencil{};
+    bool has_depth{};
+    bool has_stencil{};
+    bool has_sampled_resources{};
     bool has_blending{};
     bool has_logic_op{};
+    std::uint64_t pipeline_hash{};
     std::uint32_t num_color_attachments{};
     std::uint32_t mrt_mask{};
     std::uint32_t num_samples{};
@@ -30,12 +33,12 @@ struct SafeGpuGraphicsPipelineInfo {
 };
 
 // Central fail-closed policy boundary for the experimental Windows 7 SafeGPU renderer.
-// Build 04 requires an explicit known-safe pipeline hash and the conservative basic-feature
+// Build 07 expands an explicit known-safe pipeline hash and the conservative basic-feature
 // classifier before a guest graphics pipeline may reach Vulkan pipeline creation.
 class SafeGpuGate final {
 public:
     static constexpr std::string_view PolicyVersion() noexcept {
-        return "milestone-2-pipeline-whitelist-blending-v1";
+        return "milestone-2-texture-path-v1";
     }
 
     static EffectiveGpuMode GetEffectiveMode() noexcept;
@@ -44,6 +47,8 @@ public:
     static bool ShouldBindGuestRasterizer() noexcept;
     static bool ShouldAllowGraphics() noexcept;
     static bool ShouldAllowGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;
+    static bool IsKnownControlGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;
+    static bool ShouldUseFlatFragment(std::uint64_t pipeline_hash) noexcept;
     static bool ShouldAllowGraphicsPipeline(const SafeGpuGraphicsPipelineInfo& info) noexcept;
     static bool ShouldAllowCompute() noexcept;
     static bool ShouldAllowGuestCpSync() noexcept;
