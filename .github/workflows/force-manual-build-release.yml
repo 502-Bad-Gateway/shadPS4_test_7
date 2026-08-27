@@ -1,0 +1,63 @@
+name: Make Build and Release manual only
+
+on:
+  push:
+    branches: [PS4_external_base]
+    paths:
+      - .github/workflows/force-manual-build-release.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Make Build and Release manual-only
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('.github/workflows/build.yml')
+          text = path.read_text(encoding='utf-8')
+          updated, count = re.subn(
+              r'(?ms)^on:\n.*?^concurrency:',
+              'on:\n  workflow_dispatch:\n\nconcurrency:',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit('Could not locate the workflow trigger block')
+          path.write_text(updated, encoding='utf-8')
+
+      - name: Verify only manual trigger remains
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          head = Path('.github/workflows/build.yml').read_text(encoding='utf-8').split('concurrency:', 1)[0]
+          assert 'workflow_dispatch:' in head
+          assert '\n  push:' not in head
+          assert '\n  pull_request:' not in head
+          print(head)
+          PY
+
+      - name: Commit to main
+        shell: bash
+        run: |
+          if git diff --quiet -- .github/workflows/build.yml; then
+            echo 'main is already manual-only'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/build.yml
+          git commit -m 'Make Build and Release manual-only'
+          git push origin HEAD:main
