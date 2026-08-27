@@ -86,6 +86,8 @@ jobs:
               $updateText = $updateText.Replace(
                   $cmakeCommand,
                   $cmakeCommand + [Environment]::NewLine +
+                  "            '-DCMAKE_BUILD_TYPE=Release'," +
+                  [Environment]::NewLine +
                   "            '-DCMAKE_POLICY_VERSION_MINIMUM=3.5'," +
                   [Environment]::NewLine +
                   "            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'," +
