@@ -16,13 +16,13 @@ permissions:
   contents: read
 
 env:
-  EXPERIMENT_ITERATION: "02"
-  EXPERIMENT_NAME: "first-graphics"
+  EXPERIMENT_ITERATION: "03"
+  EXPERIMENT_NAME: "pipeline-whitelist"
   ARTIFACT_BRANCH: "shadps4_clone"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 SafeGPU milestone 2
+    name: Build Windows 7 x64 SafeGPU Build 03
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -117,10 +117,10 @@ jobs:
           Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
           Build Date: $buildDate
           Artifact: W7-$env:ARTIFACT_BRANCH-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
-          SafeGPU: milestone-2 conservative first-graphics allow-list
+          SafeGPU: milestone-2 Build 03 explicit pipeline whitelist plus conservative feature gate
           NullGPU: preserved and takes precedence
-          Compute: skipped in SafeGPU
-          Notes: vertex+fragment only; one single-sample color target; no depth/stencil, blending, logic-op, tessellation, geometry, or storage images
+          Compute: skipped in SafeGPU before compute shader/pipeline creation
+          Notes: explicit known-safe hashes only; vertex+fragment only; one single-sample color target; no depth/stencil, blending, logic-op, tessellation, geometry, storage images, or SafeGPU pipeline-cache warm-up
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 
       - name: Upload artifact
