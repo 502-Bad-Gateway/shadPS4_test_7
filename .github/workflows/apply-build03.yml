@@ -1,4 +1,4 @@
-name: Prepare SafeGPU Builds 05 06 07
+name: Fix SafeGPU Builds 05 06 07
 
 on:
   push:
@@ -9,276 +9,45 @@ permissions:
   contents: write
 
 jobs:
-  prepare:
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: shadps4_clone
+          ref: shadps4_clone_build05
           fetch-depth: 0
 
-      - name: Patch and push isolated experiment branches
+      - name: Patch all three experiment branches
         shell: bash
         run: |
-          cat > /tmp/patch_safe_gpu.py <<'PY'
+          git config user.name "502-Bad-Gateway"
+          git config user.email "135363699+502-Bad-Gateway@users.noreply.github.com"
+          git fetch origin
+
+          for branch in shadps4_clone_build05 shadps4_clone_build06 shadps4_clone_build07; do
+            git checkout -B "$branch" "origin/$branch"
+            python - <<'PY'
           from pathlib import Path
-          import subprocess
 
-          BASE = "145e0d74283a287f4f6c0aa609f7528d52f47a47"
-          BRANCHES = {
-              5: "shadps4_clone_build05",
-              6: "shadps4_clone_build06",
-              7: "shadps4_clone_build07",
-          }
-
-          def run(*args):
-              subprocess.run(args, check=True)
-
-          def read(path):
-              return Path(path).read_text(encoding="utf-8")
-
-          def write(path, text):
-              Path(path).write_text(text, encoding="utf-8")
-
-          def replace_once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise RuntimeError("%s: expected one match, found %d" % (label, count))
-              return text.replace(old, new, 1)
-
-          NEW_STRUCT = '''struct SafeGpuGraphicsPipelineInfo {
-              bool has_vertex_shader{};
-              bool has_fragment_shader{};
-              bool has_tessellation_shader{};
-              bool has_geometry_shader{};
-              bool has_storage_images{};
-              bool has_depth{};
-              bool has_stencil{};
-              bool has_sampled_resources{};
-              bool has_blending{};
-              bool has_logic_op{};
-              std::uint64_t pipeline_hash{};
-              std::uint32_t num_color_attachments{};
-              std::uint32_t mrt_mask{};
-              std::uint32_t num_samples{};
-              std::uint32_t depth_samples{};
-          };'''
-
-          HASH_METHODS = '''bool SafeGpuGate::ShouldAllowGraphicsPipelineHash(
-              const std::uint64_t pipeline_hash) noexcept {
-              const auto mode = GetEffectiveMode();
-              if (mode == EffectiveGpuMode::FullGPU) {
-                  return true;
-              }
-              // Builds 05-07 use the structural classifier as the fail-closed boundary.
-              // A zero hash is still rejected as invalid/unclassified input.
-              return mode == EffectiveGpuMode::SafeGPU && pipeline_hash != 0;
-          }
-
-          bool SafeGpuGate::IsKnownControlGraphicsPipelineHash(
-              const std::uint64_t pipeline_hash) noexcept {
-              return IsKnownControlGraphicsPipelineHashImpl(pipeline_hash);
-          }
-
-          bool SafeGpuGate::ShouldUseFlatFragment(const std::uint64_t pipeline_hash) noexcept {
-              return GetEffectiveMode() == EffectiveGpuMode::SafeGPU && FLAT_EXPR;
-          }
-
+          path = Path("src/video_core/renderer_vulkan/vk_pipeline_cache.cpp")
+          text = path.read_text(encoding="utf-8")
+          old = '''                .has_blending = has_blending,
+                .pipeline_hash = pipeline_hash,
+                .has_logic_op =
+                    graphics_key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,
           '''
-
-          PIPELINE_POLICY = '''bool SafeGpuGate::ShouldAllowGraphicsPipeline(
-              const SafeGpuGraphicsPipelineInfo& info) noexcept {
-              const auto mode = GetEffectiveMode();
-              if (mode == EffectiveGpuMode::FullGPU) {
-                  return true;
-              }
-              if (mode != EffectiveGpuMode::SafeGPU) {
-                  return false;
-              }
-
-              const bool common_simple =
-                  info.has_vertex_shader && info.has_fragment_shader &&
-                  !info.has_tessellation_shader && !info.has_geometry_shader &&
-                  !info.has_storage_images && !info.has_logic_op &&
-                  info.num_color_attachments == 1 && info.mrt_mask == 1 &&
-                  info.num_samples == 1 && info.depth_samples == 1;
-              if (!common_simple) {
-                  return false;
-              }
-
-              // Preserve the three Build 04 We Are Doomed pipelines as a native-rendering
-              // control island in every experiment.
-              if (IsKnownControlGraphicsPipelineHashImpl(info.pipeline_hash)) {
-                  return !info.has_depth && !info.has_stencil;
-              }
-
-              // BUILD_RULE
-              return UNKNOWN_RULE;
-          }
-
+          new = '''                .has_blending = has_blending,
+                .has_logic_op =
+                    graphics_key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,
+                .pipeline_hash = pipeline_hash,
           '''
-
-          SAFE_INFO = '''            const auto has_sampled_resources = [](const Shader::Info* info) {
-                  return info && (!info->images.empty() || !info->samplers.empty());
-              };
-              const VideoCore::SafeGpuGraphicsPipelineInfo safe_info{
-                  .has_vertex_shader = vs != nullptr,
-                  .has_fragment_shader = fs != nullptr,
-                  .has_tessellation_shader = tcs != nullptr || tes != nullptr,
-                  .has_geometry_shader = gs != nullptr,
-                  .has_storage_images =
-                      (vs && vs->has_storage_images) || (fs && fs->has_storage_images),
-                  .has_depth = liverpool->regs.depth_buffer.DepthValid() &&
-                               liverpool->regs.depth_control.depth_enable != 0,
-                  .has_stencil = liverpool->regs.depth_control.stencil_enable != 0,
-                  .has_sampled_resources =
-                      has_sampled_resources(vs) || has_sampled_resources(fs),
-                  .has_blending = has_blending,
-                  .has_logic_op =
-                      graphics_key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,
-                  .pipeline_hash = pipeline_hash,
-                  .num_color_attachments = graphics_key.num_color_attachments,
-                  .mrt_mask = graphics_key.mrt_mask,
-                  .num_samples = graphics_key.num_samples,
-                  .depth_samples = graphics_key.depth_samples,
-              };
-          '''
-
-          FLAT_FRAGMENT = '''            if (VideoCore::SafeGpuGate::ShouldUseFlatFragment(pipeline_hash)) {
-                  if (!safe_gpu_flat_fragment_module) {
-                      constexpr std::string_view FlatFragmentSource = R"glsl(
-          #version 450
-          layout(location = 0) out vec4 out_color;
-          void main() {
-              out_color = vec4(0.72, 0.78, 0.86, 1.0);
-          }
-          )glsl";
-                      safe_gpu_flat_fragment_module =
-                          Compile(FlatFragmentSource, vk::ShaderStageFlagBits::eFragment,
-                                  instance.GetDevice());
-                  }
-                  modules[static_cast<u32>(LogicalStage::Fragment)] =
-                      safe_gpu_flat_fragment_module;
-                  LOG_INFO(Render_Vulkan,
-                           "[SafeGPU] Build 06 flat-geometry fragment override hash={:#x}",
-                           pipeline_hash);
-              }
-          '''
-
-          def patch_header(build):
-              path = "src/video_core/safe_gpu/safe_gpu.h"
-              text = read(path)
-              start = text.index("struct SafeGpuGraphicsPipelineInfo {")
-              end = text.index("\n};", start) + 3
-              text = text[:start] + NEW_STRUCT + text[end:]
-              versions = {
-                  5: "milestone-2-depth-native-v1",
-                  6: "milestone-2-flat-geometry-v1",
-                  7: "milestone-2-texture-path-v1",
-              }
-              text = replace_once(text,
-                  'return "milestone-2-pipeline-whitelist-blending-v1";',
-                  'return "%s";' % versions[build], "policy version")
-              old = "    static bool ShouldAllowGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;\n"
-              new = old + \
-                    "    static bool IsKnownControlGraphicsPipelineHash(std::uint64_t pipeline_hash) noexcept;\n" + \
-                    "    static bool ShouldUseFlatFragment(std::uint64_t pipeline_hash) noexcept;\n"
-              text = replace_once(text, old, new, "policy declarations")
-              text = text.replace("Build 04 requires", "Build %02d expands" % build, 1)
-              write(path, text)
-
-          def patch_safe_cpp(build):
-              path = "src/video_core/safe_gpu/safe_gpu.cpp"
-              text = read(path)
-              text = text.replace("IsBuild04GraphicsPipelineWhitelisted",
-                                  "IsKnownControlGraphicsPipelineHashImpl")
-              text = text.replace("Build 04 admits nothing else.",
-                                  "These remain the native-rendering control hashes.")
-
-              start = text.index("bool SafeGpuGate::ShouldAllowGraphicsPipelineHash(")
-              end = text.index("bool SafeGpuGate::ShouldAllowGraphicsPipeline(", start)
-              flat_expr = "!IsKnownControlGraphicsPipelineHashImpl(pipeline_hash)" if build == 6 else "false"
-              methods = HASH_METHODS.replace("FLAT_EXPR", flat_expr)
-              text = text[:start] + methods + text[end:]
-
-              start = text.index("bool SafeGpuGate::ShouldAllowGraphicsPipeline(")
-              end = text.index("bool SafeGpuGate::ShouldAllowCompute()", start)
-              rules = {
-                  5: ("Build 05: native depth geometry without sampled images/samplers.",
-                      "info.has_depth && !info.has_stencil && !info.has_sampled_resources"),
-                  6: ("Build 06: broad simple depth geometry; fragment shading is overridden later.",
-                      "info.has_depth && !info.has_stencil"),
-                  7: ("Build 07: native depth geometry that uses sampled images/samplers.",
-                      "info.has_depth && !info.has_stencil && info.has_sampled_resources"),
-              }
-              rule_comment, rule_expr = rules[build]
-              policy = PIPELINE_POLICY.replace("BUILD_RULE", rule_comment).replace("UNKNOWN_RULE", rule_expr)
-              text = text[:start] + policy + text[end:]
-              write(path, text)
-
-          def patch_pipeline_cache(build):
-              path = "src/video_core/renderer_vulkan/vk_pipeline_cache.cpp"
-              text = read(path)
-              text = text.replace("Build 04", "Build %02d" % build)
-
-              start = text.index("            const VideoCore::SafeGpuGraphicsPipelineInfo safe_info{")
-              end = text.index("            if (!VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(safe_info))", start)
-              text = text[:start] + SAFE_INFO + text[end:]
-
-              text = text.replace("explicit whitelist", "candidate prefilter")
-              text = text.replace("whitelisted graphics pipeline", "candidate graphics pipeline")
-              text = text.replace("and basic feature gate", "and geometry-first feature gate")
-              text = text.replace("basic feature gate", "geometry-first feature gate")
-
-              if build == 6:
-                  marker = '        LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);'
-                  text = replace_once(text, marker, FLAT_FRAGMENT + marker,
-                                      "Build 06 flat-fragment insertion")
-                  text = replace_once(text, "PipelineCache::~PipelineCache() = default;",
-                      '''PipelineCache::~PipelineCache() {
-              if (safe_gpu_flat_fragment_module) {
-                  instance.GetDevice().destroyShaderModule(safe_gpu_flat_fragment_module);
-              }
-          }''', "Build 06 destructor")
-              write(path, text)
-
-          def patch_pipeline_header(build):
-              if build != 6:
-                  return
-              path = "src/video_core/renderer_vulkan/vk_pipeline_cache.h"
-              text = read(path)
-              marker = "    u32 num_new_pipelines{}; // new pipelines added to the cache since the game start\n"
-              text = replace_once(text, marker,
-                  marker + "    vk::ShaderModule safe_gpu_flat_fragment_module{};\n",
-                  "Build 06 flat module member")
-              write(path, text)
-
-          def patch_tests():
-              path = "tests/test_safe_gpu.cpp"
-              text = read(path).replace("has_depth_or_stencil", "has_depth")
-              write(path, text)
-
-          run("git", "config", "user.name", "502-Bad-Gateway")
-          run("git", "config", "user.email", "135363699+502-Bad-Gateway@users.noreply.github.com")
-
-          for build, branch in BRANCHES.items():
-              run("git", "checkout", "-B", branch, BASE)
-              patch_header(build)
-              patch_safe_cpp(build)
-              patch_pipeline_cache(build)
-              patch_pipeline_header(build)
-              patch_tests()
-              run("git", "diff", "--check")
-              paths = [
-                  "src/video_core/safe_gpu/safe_gpu.h",
-                  "src/video_core/safe_gpu/safe_gpu.cpp",
-                  "src/video_core/renderer_vulkan/vk_pipeline_cache.cpp",
-                  "tests/test_safe_gpu.cpp",
-              ]
-              if build == 6:
-                  paths.append("src/video_core/renderer_vulkan/vk_pipeline_cache.h")
-              run("git", "add", "--", *paths)
-              run("git", "commit", "-m", "Prepare SafeGPU Build %02d experiment [skip ci]" % build)
-              run("git", "push", "--force", "origin", "HEAD:%s" % branch)
+          count = text.count(old)
+          if count != 1:
+              raise RuntimeError(f"expected exactly one initializer-order match, found {count}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
           PY
-          python /tmp/patch_safe_gpu.py
+            git diff --check
+            git add src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
+            git commit -m "Fix SafeGPU designated initializer order"
+            git push origin "HEAD:$branch"
+          done
