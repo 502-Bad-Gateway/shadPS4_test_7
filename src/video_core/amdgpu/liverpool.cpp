@@ -17,6 +17,7 @@
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/safe_gpu/safe_gpu.h"
 
 namespace AmdGpu {
 
@@ -702,7 +703,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 });
                 if (event_eos->command == PM4CmdEventWriteEos::Command::GdsStore) {
                     ASSERT(event_eos->size == 1);
-                    if (rasterizer) {
+                    if (rasterizer && VideoCore::SafeGpuGate::ShouldAllowGdsTransfers()) {
                         rasterizer->Finish();
                         const u32 value = rasterizer->ReadDataFromGds(event_eos->gds_index);
                         *event_eos->Address() = value;
@@ -800,7 +801,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::Rewind: {
-                if (!rasterizer) {
+                if (!rasterizer || !VideoCore::SafeGpuGate::ShouldWaitForGuestRewind()) {
                     break;
                 }
                 const PM4CmdRewind* rewind = reinterpret_cast<const PM4CmdRewind*>(header);
@@ -1026,7 +1027,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::Rewind: {
-            if (!rasterizer) {
+            if (!rasterizer || !VideoCore::SafeGpuGate::ShouldWaitForGuestRewind()) {
                 break;
             }
             const PM4CmdRewind* rewind = reinterpret_cast<const PM4CmdRewind*>(header);

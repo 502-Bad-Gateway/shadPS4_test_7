@@ -1,4 +1,4 @@
-name: Build shadPS4 Win7 SafeGPU 00 null parity
+name: Build shadPS4 Win7 SafeGPU 01 transfer only
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 SafeGPU null-parity target
+    name: Build Windows 7 x64 SafeGPU transfer-only target
     runs-on: windows-2022
     timeout-minutes: 120
 
@@ -168,7 +168,12 @@ jobs:
                                   'Win7 pipeline forensics SUCCESS',
                                   'SafeGPU: enabled',
                                   'SafeGPU policy/version:',
-                                  '[SafeGPU] SKIP guest rasterizer binding',
+                                  '[SafeGPU] ALLOW guest rasterizer binding for transfer-only policy',
+                                  '[SafeGPU] ALLOW transfer type=buffer-fill',
+                                  '[SafeGPU] ALLOW transfer type=buffer-copy',
+                                  '[SafeGPU] SKIP graphics',
+                                  '[SafeGPU] SKIP compute dispatch',
+                                  'SafeGPU summary:',
                                   'Safe GPU is enabled',
                                   'Experimental Windows 7 compatible rendering mode')) {
               if (!$strings.Contains($required)) { throw "Required marker missing: $required" }
@@ -183,48 +188,51 @@ jobs:
           }
 
           @"
-          shadPS4 Windows 7 SafeGPU milestone 0: NullGPU parity
+          shadPS4 Windows 7 SafeGPU milestone 1: transfer-only
 
           GPU modes in this single executable:
 
             null_gpu=true,  safe_gpu=false -> original NullGPU (takes precedence)
-            null_gpu=false, safe_gpu=true  -> SafeGPU milestone 0
+            null_gpu=false, safe_gpu=true  -> SafeGPU milestone 1
             null_gpu=false, safe_gpu=false -> original full Vulkan renderer
 
-          SafeGPU milestone 0 intentionally leaves Liverpool unbound from guest Vulkan rendering.
-          It should match the useful game-progress behavior of NullGPU while remaining a separate,
-          default-off mode. It does not allow partial guest graphics yet.
+          SafeGPU milestone 1 binds Liverpool and permits only validated, non-GDS, nonzero,
+          dword-aligned buffer fills and non-overlapping buffer copies. Graphics pipelines,
+          compute dispatches, GDS transfers, image operations, and unknown work remain skipped.
 
           Test in this order: We Are Doomed, Wipeout Omega, Bloodborne, DOAX3 Fortune, Driveclub.
-          Test NullGPU, SafeGPU, and full Vulkan as separate runs and return the automatic
-          test-results folders. Pipeline forensics remains available in full Vulkan mode.
-          "@ | Out-File -Encoding ascii (Join-Path $output 'SAFEGPU-MILESTONE-0.txt')
+          Test SafeGPU for all five titles and return the automatic test-results folders.
+          Recheck We Are Doomed in full Vulkan as the regression canary. Pipeline forensics
+          remains available only in full Vulkan mode.
+          "@ | Out-File -Encoding ascii (Join-Path $output 'SAFEGPU-MILESTONE-1.txt')
 
           $buildDate = (Get-Date).ToUniversalTime().ToString('o')
           @"
           Repository: $env:GITHUB_REPOSITORY
           Branch: $env:GITHUB_REF_NAME
           Baseline: 8ecd4e46e2e6df36901940bed05785665fa5474c
-          Iteration: 00
-          Experiment: null-parity
+          Iteration: 01
+          Experiment: transfer-only
           Commit: $env:GITHUB_SHA
           Workflow: $env:GITHUB_WORKFLOW
           Workflow Run ID: $env:GITHUB_RUN_ID
           Workflow Run Number: $env:GITHUB_RUN_NUMBER
           Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
           Build Date: $buildDate
-          SafeGPU: available; default=false; milestone 0 skips all guest rendering
+          SafeGPU: available; default=false; milestone 1 permits validated simple buffer transfers
           NullGPU: original behavior preserved; takes precedence over SafeGPU
           Notes: Repository rename deferred by user; full Vulkan and pipeline forensics preserved
           Compiler: clang-cl (MSVC/UCRT target)
           Build Type: Release
           Windows target: Windows 7 x64 (6.1)
           Vulkan target: Vulkan 1.2 compatibility
-          SafeGPU policy revision: milestone-0-null-parity-v1
+          SafeGPU policy revision: milestone-1-transfer-only-v1
           Allowed graphics classes: none
           Allowed pipeline hashes: none
           Blocked pipeline hashes: all guest graphics pipelines
-          Compute state: skipped by unbound guest rasterizer
+          Compute state: skipped before pipeline lookup or dispatch
+          Allowed transfer classes: non-GDS dword-aligned buffer fill and non-overlapping copy
+          Blocked transfer classes: GDS, zero-size, unaligned, overlapping, image, blit, and unknown
           "@ | Out-File -Encoding ascii (Join-Path $output 'BUILD-IDENTITY.txt')
 
           $hashLines = @(Get-ChildItem $output -File |
@@ -235,10 +243,10 @@ jobs:
               } | Sort-Object)
           $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
 
-      - name: Upload Windows 7 SafeGPU null-parity artifact
+      - name: Upload Windows 7 SafeGPU transfer-only artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shadps4-win7-safe-gpu-00-null-parity
+          name: shadps4-win7-safe-gpu-01-transfer-only
           path: artifact/
           if-no-files-found: error
           retention-days: 30

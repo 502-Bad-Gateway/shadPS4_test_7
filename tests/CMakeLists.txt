@@ -19,6 +19,7 @@ set(SETTINGS_TEST_SOURCES
     # Under test
     ${CMAKE_SOURCE_DIR}/src/core/emulator_settings.cpp
     ${CMAKE_SOURCE_DIR}/src/core/emulator_state.cpp
+    ${CMAKE_SOURCE_DIR}/src/video_core/safe_gpu/safe_gpu.cpp
 
     # Minimal common support
     ${CMAKE_SOURCE_DIR}/src/common/path_util.cpp
@@ -37,6 +38,7 @@ set(SETTINGS_TEST_SOURCES
 
     # Tests
     test_emulator_settings.cpp
+    test_safe_gpu.cpp
     # Windows static guest red-zone protection
     test_windows_guest_red_zone_protection_settings.cpp
 )

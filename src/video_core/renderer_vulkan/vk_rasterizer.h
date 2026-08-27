@@ -84,6 +84,20 @@ public:
     }
 
 private:
+    struct SafeGpuStats {
+        u64 graphics_skipped{};
+        u64 compute_skipped{};
+        u64 fills_allowed{};
+        u64 fills_skipped{};
+        u64 copies_allowed{};
+        u64 copies_skipped{};
+        u64 cp_sync_skipped{};
+        u64 image_downloads_skipped{};
+    };
+
+    static bool ShouldLogSafeGpuSample(u64 count) noexcept;
+    void LogSafeGpuSummary() const;
+
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
     void Resolve();
@@ -140,6 +154,8 @@ private:
     Pipeline::DescriptorWrites set_writes;
     Pipeline::BufferBarriers buffer_barriers;
     Shader::PushData push_data;
+    const bool safe_gpu_active;
+    SafeGpuStats safe_gpu_stats;
 
     using BufferBindingInfo = std::tuple<VideoCore::BufferId, AmdGpu::Buffer, u64>;
     boost::container::static_vector<BufferBindingInfo, Shader::NUM_BUFFERS> buffer_bindings;

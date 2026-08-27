@@ -39,23 +39,60 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
       buffer_cache{instance, scheduler, liverpool_, texture_cache, page_manager},
       texture_cache{instance, scheduler, liverpool_, buffer_cache, page_manager},
       liverpool{liverpool_}, memory{Core::Memory::Instance()},
-      pipeline_cache{instance, scheduler, liverpool} {
+      pipeline_cache{instance, scheduler, liverpool},
+      safe_gpu_active{VideoCore::SafeGpuGate::IsEnabled()} {
     if (!EmulatorSettings.IsNullGPU()) {
         if (VideoCore::SafeGpuGate::ShouldBindGuestRasterizer()) {
             liverpool->BindRasterizer(this);
+            if (safe_gpu_active) {
+                LOG_INFO(Render_Vulkan,
+                         "[SafeGPU] ALLOW guest rasterizer binding for transfer-only policy {}",
+                         VideoCore::SafeGpuGate::PolicyVersion());
+            }
         } else {
             LOG_INFO(Render_Vulkan,
-                     "[SafeGPU] SKIP guest rasterizer binding; all guest graphics, compute, and "
-                     "transfer rendering work is disabled by policy {}",
+                     "[SafeGPU] SKIP guest rasterizer binding by policy {}",
                      VideoCore::SafeGpuGate::PolicyVersion());
         }
     }
     memory->SetRasterizer(this);
 }
 
-Rasterizer::~Rasterizer() = default;
+Rasterizer::~Rasterizer() {
+    if (safe_gpu_active) {
+        LogSafeGpuSummary();
+    }
+}
+
+bool Rasterizer::ShouldLogSafeGpuSample(const u64 count) noexcept {
+    return count <= 4 || (count & (count - 1)) == 0;
+}
+
+void Rasterizer::LogSafeGpuSummary() const {
+    const u64 transfers_allowed = safe_gpu_stats.fills_allowed + safe_gpu_stats.copies_allowed;
+    const u64 transfers_skipped = safe_gpu_stats.fills_skipped + safe_gpu_stats.copies_skipped;
+    LOG_INFO(Render_Vulkan,
+             "SafeGPU summary: graphics skipped={}, compute skipped={}, transfers allowed={} "
+             "(fills={}, copies={}), transfers skipped={} (fills={}, copies={}), "
+             "guest cp-sync skipped={}, image downloads skipped={}",
+             safe_gpu_stats.graphics_skipped, safe_gpu_stats.compute_skipped, transfers_allowed,
+             safe_gpu_stats.fills_allowed, safe_gpu_stats.copies_allowed, transfers_skipped,
+             safe_gpu_stats.fills_skipped, safe_gpu_stats.copies_skipped,
+             safe_gpu_stats.cp_sync_skipped, safe_gpu_stats.image_downloads_skipped);
+}
 
 void Rasterizer::CpSync() {
+    if (safe_gpu_active && !VideoCore::SafeGpuGate::ShouldAllowGuestCpSync()) {
+        const u64 count = ++safe_gpu_stats.cp_sync_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP guest cp-sync; compute and draw-indirect are disabled "
+                     "count={}",
+                     count);
+        }
+        return;
+    }
+
     scheduler.EndRendering();
     auto cmdbuf = scheduler.CommandBuffer();
 
@@ -197,6 +234,15 @@ void Rasterizer::EliminateFastClear() {
 void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     RENDERER_TRACE;
 
+    if (safe_gpu_active && !VideoCore::SafeGpuGate::ShouldAllowGraphics()) {
+        const u64 count = ++safe_gpu_stats.graphics_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan, "[SafeGPU] SKIP graphics draw indexed={} count={}", is_indexed,
+                     count);
+        }
+        return;
+    }
+
     scheduler.PopPendingOperations();
 
     if (!FilterDraw()) {
@@ -246,6 +292,15 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
 void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u32 stride,
                               u32 max_count, VAddr count_address) {
     RENDERER_TRACE;
+
+    if (safe_gpu_active && !VideoCore::SafeGpuGate::ShouldAllowGraphics()) {
+        const u64 count = ++safe_gpu_stats.graphics_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan, "[SafeGPU] SKIP graphics indirect draw indexed={} count={}",
+                     is_indexed, count);
+        }
+        return;
+    }
 
     scheduler.PopPendingOperations();
 
@@ -327,6 +382,14 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
 void Rasterizer::DispatchDirect() {
     RENDERER_TRACE;
 
+    if (safe_gpu_active && !VideoCore::SafeGpuGate::ShouldAllowCompute()) {
+        const u64 count = ++safe_gpu_stats.compute_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan, "[SafeGPU] SKIP compute dispatch type=direct count={}", count);
+        }
+        return;
+    }
+
     scheduler.PopPendingOperations();
 
     const auto& cs_program = liverpool->GetCsRegs();
@@ -357,6 +420,15 @@ void Rasterizer::DispatchDirect() {
 
 void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     RENDERER_TRACE;
+
+    if (safe_gpu_active && !VideoCore::SafeGpuGate::ShouldAllowCompute()) {
+        const u64 count = ++safe_gpu_stats.compute_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan, "[SafeGPU] SKIP compute dispatch type=indirect count={}",
+                     count);
+        }
+        return;
+    }
 
     scheduler.PopPendingOperations();
 
@@ -404,7 +476,7 @@ void Rasterizer::OnSubmit() {
         fault_process_pending = false;
         buffer_cache.ProcessFaultBuffer();
     }
-    texture_cache.ProcessDownloadImages();
+    ProcessDownloadImages();
     texture_cache.RunGarbageCollector();
     buffer_cache.RunGarbageCollector();
 }
@@ -1088,10 +1160,45 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
 }
 
 void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) {
+    if (safe_gpu_active) {
+        if (!VideoCore::SafeGpuGate::ShouldAllowSimpleBufferFill(address, num_bytes, is_gds)) {
+            const u64 count = ++safe_gpu_stats.fills_skipped;
+            if (ShouldLogSafeGpuSample(count)) {
+                LOG_INFO(Render_Vulkan,
+                         "[SafeGPU] SKIP transfer type=buffer-fill bytes={} gds={} "
+                         "reason=requires-non-gds-nonzero-dword-range count={}",
+                         num_bytes, is_gds, count);
+            }
+            return;
+        }
+        const u64 count = ++safe_gpu_stats.fills_allowed;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan, "[SafeGPU] ALLOW transfer type=buffer-fill bytes={} count={}",
+                     num_bytes, count);
+        }
+    }
     buffer_cache.FillBuffer(address, num_bytes, value, is_gds);
 }
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
+    if (safe_gpu_active) {
+        if (!VideoCore::SafeGpuGate::ShouldAllowSimpleBufferCopy(dst, src, num_bytes, dst_gds,
+                                                                 src_gds)) {
+            const u64 count = ++safe_gpu_stats.copies_skipped;
+            if (ShouldLogSafeGpuSample(count)) {
+                LOG_INFO(Render_Vulkan,
+                         "[SafeGPU] SKIP transfer type=buffer-copy bytes={} dst_gds={} src_gds={} "
+                         "reason=requires-non-gds-nonzero-aligned-nonoverlap count={}",
+                         num_bytes, dst_gds, src_gds, count);
+            }
+            return;
+        }
+        const u64 count = ++safe_gpu_stats.copies_allowed;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan, "[SafeGPU] ALLOW transfer type=buffer-copy bytes={} count={}",
+                     num_bytes, count);
+        }
+    }
     buffer_cache.CopyBuffer(dst, src, num_bytes, dst_gds, src_gds);
 }
 
@@ -1122,6 +1229,15 @@ bool Rasterizer::ReadMemory(VAddr addr, u64 size) {
 }
 
 void Rasterizer::ProcessDownloadImages() {
+    if (safe_gpu_active) {
+        const u64 count = ++safe_gpu_stats.image_downloads_skipped;
+        if (ShouldLogSafeGpuSample(count)) {
+            LOG_INFO(Render_Vulkan,
+                     "[SafeGPU] SKIP image download processing; transfer-only policy count={}",
+                     count);
+        }
+        return;
+    }
     texture_cache.ProcessDownloadImages();
 }
 
