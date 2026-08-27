@@ -206,6 +206,14 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         return;
     }
     const auto state = BeginRendering(pipeline);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    if (!(state.legacy_attachment_flags & RenderState::LegacyAttachmentsValid)) {
+        LOG_WARNING(Render_Vulkan,
+                    "Skipping graphics draw with incompatible legacy render-pass attachments");
+        ResetBindings();
+        return;
+    }
+#endif
 
     buffer_cache.BindVertexBuffers(*pipeline, buffer_barriers);
     if (is_indexed) {
@@ -269,6 +277,15 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         return;
     }
     const auto state = BeginRendering(pipeline);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    if (!(state.legacy_attachment_flags & RenderState::LegacyAttachmentsValid)) {
+        LOG_WARNING(Render_Vulkan,
+                    "Skipping indirect graphics draw with incompatible legacy render-pass "
+                    "attachments");
+        ResetBindings();
+        return;
+    }
+#endif
 
     buffer_cache.BindVertexBuffers(*pipeline, buffer_barriers);
     if (is_indexed) {
@@ -922,9 +939,25 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     state.height = instance.GetMaxFramebufferHeight();
     state.num_layers = std::numeric_limits<u16>::max();
     state.num_color_attachments = std::bit_width(key.mrt_mask);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+    const auto& legacy_render_pass_key = pipeline->GetLegacyRenderPassKey();
+    if ((legacy_render_pass_key.has_depth || legacy_render_pass_key.has_stencil) &&
+        legacy_render_pass_key.depth_format != vk::Format::eUndefined) {
+        state.legacy_attachment_flags |= RenderState::LegacyHasDepthAttachment;
+    }
+#endif
     for (auto cb = 0u; cb < state.num_color_attachments; ++cb) {
         auto& [image_id, desc] = cb_descs[cb];
         if (!image_id) {
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+            if (legacy_render_pass_key.color_formats[cb] != vk::Format::eUndefined) {
+                state.legacy_attachment_flags &= ~RenderState::LegacyAttachmentsValid;
+                LOG_WARNING(Render_Vulkan,
+                            "Legacy render-pass color attachment {} is required but has no "
+                            "image view",
+                            cb);
+            }
+#endif
             state.color_attachments[cb] = {};
             continue;
         }
@@ -936,6 +969,25 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         texture_cache.UpdateImage(image_id);
         image->SetBackingSamples(key.color_samples[cb]);
         const auto& image_view = texture_cache.FindRenderTarget(image_id, desc);
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        const auto expected_format = legacy_render_pass_key.color_formats[cb];
+        if (expected_format == vk::Format::eUndefined ||
+            image_view.info.format != expected_format) {
+            state.legacy_attachment_flags &= ~RenderState::LegacyAttachmentsValid;
+            LOG_WARNING(Render_Vulkan,
+                        "Legacy render-pass color attachment {} format mismatch: expected {}, "
+                        "actual {}",
+                        cb, vk::to_string(expected_format), vk::to_string(image_view.info.format));
+        }
+        const auto expected_samples = key.color_samples[cb];
+        if (expected_samples != 0 && image->backing->num_samples != expected_samples) {
+            state.legacy_attachment_flags &= ~RenderState::LegacyAttachmentsValid;
+            LOG_WARNING(Render_Vulkan,
+                        "Legacy render-pass color attachment {} sample mismatch: expected {}, "
+                        "actual {}",
+                        cb, expected_samples, image->backing->num_samples);
+        }
+#endif
         const auto slice = image_view.info.range.base.layer;
         const auto mip = image_view.info.range.base.level;
 
@@ -981,6 +1033,25 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         const auto htile_address = regs.depth_htile_data_base.GetAddress();
         const auto& image_view = texture_cache.FindDepthTarget(image_id, desc);
         auto& image = texture_cache.GetImage(image_id);
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        if (!(state.legacy_attachment_flags & RenderState::LegacyHasDepthAttachment) ||
+            image_view.info.format != legacy_render_pass_key.depth_format) {
+            state.legacy_attachment_flags &= ~RenderState::LegacyAttachmentsValid;
+            LOG_WARNING(Render_Vulkan,
+                        "Legacy render-pass depth attachment format mismatch: expected {}, actual "
+                        "{}",
+                        vk::to_string(legacy_render_pass_key.depth_format),
+                        vk::to_string(image_view.info.format));
+        }
+        if (image->backing->num_samples != regs.depth_buffer.NumSamples()) {
+            state.legacy_attachment_flags &= ~RenderState::LegacyAttachmentsValid;
+            LOG_WARNING(Render_Vulkan,
+                        "Legacy render-pass depth attachment sample mismatch: expected {}, actual "
+                        "{}",
+                        regs.depth_buffer.NumSamples(), image->backing->num_samples);
+        }
+#endif
 
         const auto slice = image_view.info.range.base.layer;
         const bool is_depth_clear =
@@ -1030,6 +1101,13 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         image.usage.depth_target = true;
     } else {
         state.depth_stencil_attachment = {};
+#ifdef SHADPS4_WINDOWS_7_COMPAT
+        if (state.legacy_attachment_flags & RenderState::LegacyHasDepthAttachment) {
+            state.legacy_attachment_flags &= ~RenderState::LegacyAttachmentsValid;
+            LOG_WARNING(Render_Vulkan,
+                        "Legacy render-pass depth attachment is required but has no image view");
+        }
+#endif
     }
 
     if (state.num_layers == std::numeric_limits<u16>::max()) {
@@ -1037,7 +1115,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     }
 
 #ifdef SHADPS4_WINDOWS_7_COMPAT
-    LegacyRenderPassKey render_pass_key = pipeline->GetLegacyRenderPassKey();
+    LegacyRenderPassKey render_pass_key = legacy_render_pass_key;
     for (u32 index = 0; index < state.num_color_attachments; ++index) {
         if (state.color_attachments[index].image_view) {
             render_pass_key.color_layouts[index] = state.color_attachments[index].image_layout;

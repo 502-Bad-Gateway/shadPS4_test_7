@@ -50,7 +50,8 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         }
     }
     const auto& db = render_state.depth_stencil_attachment;
-    if (db.image_view && (db.has_depth || db.has_stencil)) {
+    if ((render_state.legacy_attachment_flags & RenderState::LegacyHasDepthAttachment) &&
+        db.image_view) {
         attachment_views.push_back(db.image_view);
     }
 

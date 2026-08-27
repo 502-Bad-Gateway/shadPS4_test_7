@@ -43,6 +43,9 @@ struct RenderState {
     RenderAttachment depth_stencil_attachment;
 #ifdef SHADPS4_WINDOWS_7_COMPAT
     vk::RenderPass render_pass;
+    static constexpr u64 LegacyAttachmentsValid = 1ULL << 0;
+    static constexpr u64 LegacyHasDepthAttachment = 1ULL << 1;
+    u64 legacy_attachment_flags{LegacyAttachmentsValid};
 #endif
     u16 width;
     u16 height;

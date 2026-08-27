@@ -1,4 +1,4 @@
-name: Build shadPS4 Win7 V1 pipeline forensics
+name: Build shadPS4 Win7 V1 attachment diagnostics
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 pipeline-forensics target
+    name: Build Windows 7 x64 attachment-diagnostics target
     runs-on: windows-2022
     timeout-minutes: 120
 
@@ -58,6 +58,48 @@ jobs:
         uses: egor-tensin/vs-shell@v2
         with:
           arch: x64
+
+      - name: Build Vulkan 1.2 Windows 7 validation layer
+        shell: pwsh
+        run: |
+          $validationRoot = Join-Path $env:RUNNER_TEMP 'Vulkan-ValidationLayers-v1.2.198'
+          Remove-Item -Recurse -Force $validationRoot -ErrorAction SilentlyContinue
+          git clone --depth 1 --branch v1.2.198 `
+            https://github.com/KhronosGroup/Vulkan-ValidationLayers.git $validationRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers checkout failed' }
+          $env:CFLAGS = '/MT'
+          $env:CXXFLAGS = '/MT'
+          Push-Location $validationRoot
+          try {
+              python scripts/update_deps.py --dir external --arch x64 --config release `
+                --generator Ninja --optional tests
+              if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers dependency build failed' }
+              cmake -C external/helper.cmake -S . -B build -G Ninja `
+                '-DCMAKE_BUILD_TYPE=Release' `
+                '-DBUILD_TESTS=OFF' `
+                '-DBUILD_WERROR=OFF' `
+                '-DBUILD_LAYER_SUPPORT_FILES=OFF' `
+                '-DCMAKE_SYSTEM_VERSION=6.1' `
+                '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded' `
+                '-DCMAKE_C_FLAGS_RELEASE=/MT' `
+                '-DCMAKE_CXX_FLAGS_RELEASE=/MT'
+              if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers configure failed' }
+              cmake --build build --target install --parallel $env:NUMBER_OF_PROCESSORS
+              if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers build failed' }
+          } finally {
+              Pop-Location
+          }
+          $layerDll = Get-ChildItem $validationRoot -Recurse -Filter 'VkLayer_khronos_validation.dll' |
+              Where-Object { $_.FullName -match '\\(Release|install|lib|bin)\\' } |
+              Select-Object -First 1
+          $layerJson = Get-ChildItem $validationRoot -Recurse -Filter 'VkLayer_khronos_validation.json' |
+              Select-Object -First 1
+          if (!$layerDll -or !$layerJson) {
+              throw 'Vulkan Validation Layers build did not produce the validation DLL and manifest'
+          }
+          "VVL_ROOT=$validationRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VVL_DLL=$($layerDll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VVL_JSON=$($layerJson.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Prepare launcher dependency
         shell: pwsh
@@ -142,6 +184,17 @@ jobs:
           Copy-Item LICENSE (Join-Path $output 'LICENSE-shadPS4')
           Copy-Item tools/win7-launcher/LICENSE-GPL-2.0-or-later.txt `
               (Join-Path $output 'LICENSE-win7-launcher-GPL-2.0-or-later.txt')
+          Copy-Item (Join-Path $env:VVL_ROOT 'LICENSE.txt') `
+              (Join-Path $output 'LICENSE-Vulkan-ValidationLayers-Apache-2.0.txt')
+
+          $layerDirectory = Join-Path $output 'vulkan/explicit_layer.d'
+          New-Item -ItemType Directory -Force -Path $layerDirectory | Out-Null
+          Copy-Item $env:VVL_DLL (Join-Path $layerDirectory 'VkLayer_khronos_validation.dll')
+          Copy-Item $env:VVL_JSON (Join-Path $layerDirectory 'VkLayer_khronos_validation.json')
+          if (!(Test-Path (Join-Path $layerDirectory 'VkLayer_khronos_validation.dll')) -or
+              !(Test-Path (Join-Path $layerDirectory 'VkLayer_khronos_validation.json'))) {
+              throw 'App-local Vulkan validation layer package is incomplete'
+          }
 
           Copy-Item (Join-Path $env:RUNNER_TEMP 'CLANG-CL-IDENTITY.txt') `
               (Join-Path $output 'CLANG-CL-IDENTITY.txt')
@@ -159,6 +212,19 @@ jobs:
               }
           }
 
+          $validationAuditPath = Join-Path $output 'VVL-PE-AUDIT.txt'
+          & $readObj '--file-headers' '--coff-imports' `
+              (Join-Path $layerDirectory 'VkLayer_khronos_validation.dll') |
+              Out-File -Encoding utf8 $validationAuditPath
+          $validationAudit = Get-Content -Raw $validationAuditPath
+          foreach ($forbidden in @('VirtualAlloc2', 'CreateFileMapping2', 'MapViewOfFile3',
+                                   'UnmapViewOfFile2', 'SetThreadDescription',
+                                   'GetThreadDescription', 'GetSystemTimePreciseAsFileTime')) {
+              if ($validationAudit -match "Name: $([regex]::Escape($forbidden))") {
+                  throw "Forbidden post-Win7 static import detected in validation layer: $forbidden"
+              }
+          }
+
           $stringsTool = Join-Path $env:LLVM_MINGW_ROOT 'bin/llvm-strings.exe'
           $strings = (& $stringsTool (Join-Path $output 'shadps4.exe') | Out-String)
           foreach ($required in @('Windows 7 compatibility-only settings active',
@@ -166,7 +232,8 @@ jobs:
                                   'pipeline-forensics build forces vkValidation=true',
                                   'Win7 pipeline forensics enabled',
                                   'Win7 pipeline forensics START',
-                                  'Win7 pipeline forensics SUCCESS')) {
+                                  'Win7 pipeline forensics SUCCESS',
+                                  'Using app-local Vulkan validation layer path')) {
               if (!$strings.Contains($required)) { throw "Required marker missing: $required" }
           }
           foreach ($forbidden in @('Windows 7 NVIDIA sampler workaround',
@@ -179,30 +246,43 @@ jobs:
           }
 
           @"
-          shadPS4 Windows 7 pipeline-forensics diagnostic build
+          shadPS4 Windows 7 legacy-attachment diagnostic build
 
-          This diagnostic build forces vkValidation=true and vkValidationCore=true at runtime.
-          If the validation layer is unavailable on Windows 7, the normal log will report that
-          fact; the Vulkan event markers remain active independently.
+          This build forces vkValidation=true and vkValidationCore=true at runtime and bundles
+          a Vulkan Validation Layers v1.2.198 DLL built with a Windows 7 target and static CRT.
+          The executable adds artifact\vulkan\explicit_layer.d to VK_LAYER_PATH before Vulkan
+          instance discovery, so VK_LAYER_KHRONOS_validation is app-local and does not require
+          an SDK installation on the test computer.
+
+          The legacy Vulkan 1.2 path now checks that every render-pass attachment required by the
+          pipeline has a matching image view, format, and sample count. A draw with a missing or
+          mismatched required attachment is skipped before command recording and logged. This is
+          intended to prevent the old NVIDIA driver from receiving an incomplete concrete
+          framebuffer while preserving the full forensic event stream.
 
           This build restores normal renderer behavior after the completed experimental axes.
           It records each legacy NVIDIA Vulkan 1.2 graphics-pipeline creation attempt under:
 
-            user\shader\pipeline_forensics\run_*\
+          user\shader\pipeline_forensics\run_*\
 
           For the minimal diagnostic test, run Bloodborne once and We Are Doomed once with
           null_gpu=false. Return both the normal test-results archive and the complete
-          user\shader\pipeline_forensics folder. A pipeline report with status=started but no
-          later status=success identifies the call where the driver stopped.
+          user\shader\pipeline_forensics folder. A validation message or a pipeline report with
+          status=started but no later status=success identifies the first invalid API object or
+          call where the driver stopped.
           "@ | Out-File -Encoding ascii (Join-Path $output 'PIPELINE-FORENSICS-README.txt')
 
           @"
           lineage=clean-upstream-7fb1a530
           upstream_commit=7fb1a530c15415097836521fec6f3483e27c81ae
-          phase=windows7-vulkan-pipeline-diagnostics
-          single_axis=validation-and-vulkan-call-boundary-forensics
+          phase=windows7-vulkan-legacy-attachment-diagnostics
+          single_axis=legacy-attachment-invariant-guard-and-vvl-1.2.198
           validation_forced=true
-          renderer_behavior_change=false
+          validation_layer=VK_LAYER_KHRONOS_validation
+          validation_layer_source=vulkan-validationlayers-v1.2.198
+          validation_layer_win7_target=true
+          validation_layer_static_crt=true
+          renderer_behavior_change=skip-invalid-legacy-attachment-draws
           previous_pipeline_optimization_experiment=reverted
           emulator_toolchain=clang-cl-msvc-ucrt
           emulator_target=x86_64-pc-windows-msvc
@@ -223,10 +303,10 @@ jobs:
               } | Sort-Object)
           $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
 
-      - name: Upload Windows 7 V1 pipeline-forensics artifact
+      - name: Upload Windows 7 V1 attachment-diagnostics artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shadps4-win7-v1-pipeline-forensics-${{ github.sha }}
+          name: shadps4-win7-v1-attachment-diagnostics-${{ github.sha }}
           path: artifact/
           if-no-files-found: error
           retention-days: 30

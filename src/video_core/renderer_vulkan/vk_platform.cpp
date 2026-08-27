@@ -13,6 +13,7 @@
 #define VK_USE_PLATFORM_XLIB_KHR
 #endif
 
+#include <cstdlib>
 #include <vector>
 #include <fmt/ranges.h>
 
@@ -23,6 +24,10 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -31,6 +36,45 @@ namespace Vulkan {
 
 static const char* const VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
 static const char* const CRASH_DIAGNOSTIC_LAYER_NAME = "VK_LAYER_LUNARG_crash_diagnostic";
+
+#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+#if defined(_WIN32)
+static void ConfigureAppLocalValidationLayerPath() {
+    std::array<wchar_t, 32768> executable_path{};
+    const DWORD length =
+        GetModuleFileNameW(nullptr, executable_path.data(), executable_path.size());
+    if (length == 0 || length >= executable_path.size()) {
+        LOG_WARNING(Render_Vulkan,
+                    "Could not locate the executable to configure the app-local validation "
+                    "layer");
+        return;
+    }
+
+    const auto layer_directory = std::filesystem::path(executable_path.data(),
+                                                       executable_path.data() + length)
+                                     .parent_path() /
+                                 "vulkan" / "explicit_layer.d";
+    const auto layer_manifest = layer_directory / "VkLayer_khronos_validation.json";
+    if (!std::filesystem::is_regular_file(layer_manifest)) {
+        LOG_WARNING(Render_Vulkan, "App-local validation layer manifest not found at {}",
+                    Common::FS::PathToUTF8String(layer_manifest));
+        return;
+    }
+
+    std::string layer_path = Common::FS::PathToUTF8String(layer_directory);
+    if (const char* existing_path = std::getenv("VK_LAYER_PATH"); existing_path && *existing_path) {
+        layer_path += ';';
+        layer_path += existing_path;
+    }
+    if (_putenv_s("VK_LAYER_PATH", layer_path.c_str()) != 0) {
+        LOG_WARNING(Render_Vulkan,
+                    "Could not set VK_LAYER_PATH for the app-local validation layer");
+        return;
+    }
+    LOG_INFO(Render_Vulkan, "Using app-local Vulkan validation layer path: {}", layer_path);
+}
+#endif
+#endif
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugUtilsCallback(
     vk::DebugUtilsMessageSeverityFlagBitsEXT severity, vk::DebugUtilsMessageTypeFlagsEXT type,
@@ -291,6 +335,14 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
              "RenderPass2 when null_gpu=false");
 #endif
 
+#ifdef SHADPS4_WINDOWS_7_COMPAT_ONLY
+#if defined(_WIN32)
+    if (enable_validation) {
+        ConfigureAppLocalValidationLayerPath();
+    }
+#endif
+#endif
+
     const auto layers = GetInstanceLayers(enable_validation, enable_crash_diagnostic);
     const auto extensions = GetLayerExtensions(GetInstanceExtensions(window_type, true), layers);
 
@@ -409,21 +461,37 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
         },
     };
 
-    vk::StructureChain<vk::InstanceCreateInfo, vk::LayerSettingsCreateInfoEXT> instance_ci_chain = {
-        vk::InstanceCreateInfo{
-            .pApplicationInfo = &application_info,
-            .enabledLayerCount = static_cast<u32>(layers.size()),
-            .ppEnabledLayerNames = layers.data(),
-            .enabledExtensionCount = static_cast<u32>(extensions.size()),
-            .ppEnabledExtensionNames = extensions.data(),
-        },
-        vk::LayerSettingsCreateInfoEXT{
-            .settingCount = layer_setings.size(),
-            .pSettings = layer_setings.data(),
-        },
+    const vk::InstanceCreateInfo instance_ci{
+        .pApplicationInfo = &application_info,
+        .enabledLayerCount = static_cast<u32>(layers.size()),
+        .ppEnabledLayerNames = layers.data(),
+        .enabledExtensionCount = static_cast<u32>(extensions.size()),
+        .ppEnabledExtensionNames = extensions.data(),
     };
 
-    auto [instance_result, instance] = vk::createInstanceUnique(instance_ci_chain.get());
+    vk::Result instance_result{};
+    vk::UniqueInstance instance;
+    const bool has_layer_settings = std::ranges::any_of(
+        extensions, [](const char* extension) {
+            return std::strcmp(extension, VK_EXT_LAYER_SETTINGS_EXTENSION_NAME) == 0;
+        });
+    if (has_layer_settings) {
+        vk::StructureChain<vk::InstanceCreateInfo, vk::LayerSettingsCreateInfoEXT>
+            instance_ci_chain = {
+                instance_ci,
+                vk::LayerSettingsCreateInfoEXT{
+                    .settingCount = layer_setings.size(),
+                    .pSettings = layer_setings.data(),
+                },
+            };
+        auto result = vk::createInstanceUnique(instance_ci_chain.get());
+        instance_result = result.result;
+        instance = std::move(result.value);
+    } else {
+        auto result = vk::createInstanceUnique(instance_ci);
+        instance_result = result.result;
+        instance = std::move(result.value);
+    }
     ASSERT_MSG(instance_result == vk::Result::eSuccess, "Failed to create instance: {}",
                vk::to_string(instance_result));
 
