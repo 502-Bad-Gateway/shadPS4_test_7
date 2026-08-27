@@ -69,23 +69,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers checkout failed' }
           $env:CFLAGS = '/MT'
           $env:CXXFLAGS = '/MT'
-          # CMake 4 rejects the pre-3.5 policy declaration used by the
-          # Vulkan 1.2-era SPIRV-Headers dependency.  update_deps.py does
-          # not expose a way to pass this cache variable to each dependency,
-          # so scope a small CMake wrapper to this dependency build only.
-          $realCmake = (Get-Command cmake.exe -ErrorAction Stop).Source
-          $cmakeShimDirectory = Join-Path $env:RUNNER_TEMP 'cmake-policy-shim'
-          Remove-Item -Recurse -Force $cmakeShimDirectory -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $cmakeShimDirectory | Out-Null
-          $cmakeShim = Join-Path $cmakeShimDirectory 'cmake.bat'
-          @("@echo off",
-            "`"$realCmake`" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 %*",
-            'exit /b %ERRORLEVEL%') |
-              Set-Content -Encoding ascii $cmakeShim
-          $pathBeforeCmakeShim = $env:PATH
-          $env:PATH = "$cmakeShimDirectory;$pathBeforeCmakeShim"
           Push-Location $validationRoot
           try {
+              # CMake 4 rejects the pre-3.5 policy declaration used by the
+              # Vulkan 1.2-era SPIRV-Headers dependency.  update_deps.py
+              # has no command-line passthrough for this cache variable, so
+              # add it directly to its dependency CMake command list.
+              $updateDeps = Join-Path $validationRoot 'scripts/update_deps.py'
+              $updateText = Get-Content -Raw $updateDeps
+              $cmakeCommand = "            'cmake', self.repo_dir,"
+              $cmakeCommandCount = ([regex]::Matches(
+                  $updateText, [regex]::Escape($cmakeCommand))).Count
+              if ($cmakeCommandCount -ne 1) {
+                  throw 'Unexpected Vulkan Validation Layers update_deps.py layout'
+              }
+              $updateText = $updateText.Replace(
+                  $cmakeCommand,
+                  $cmakeCommand + [Environment]::NewLine +
+                  "            '-DCMAKE_POLICY_VERSION_MINIMUM=3.5',")
+              Set-Content -Encoding utf8 $updateDeps $updateText
               python scripts/update_deps.py --dir external --arch x64 --config release `
                 --generator Ninja --optional tests
               if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers dependency build failed' }
@@ -103,7 +105,6 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers build failed' }
           } finally {
               Pop-Location
-              $env:PATH = $pathBeforeCmakeShim
           }
           $layerDll = Get-ChildItem $validationRoot -Recurse -Filter 'VkLayer_khronos_validation.dll' |
               Where-Object { $_.FullName -match '\\(Release|install|lib|bin)\\' } |
