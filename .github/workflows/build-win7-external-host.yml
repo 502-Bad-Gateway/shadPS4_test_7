@@ -1,0 +1,114 @@
+name: Build Win7 external GPU host
+
+on:
+  push:
+    branches: [PS4_external_base]
+    paths:
+      - CMakeLists.txt
+      - src/video_core/renderer_vulkan/vk_instance.cpp
+      - src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+      - src/video_core/renderer_vulkan/win7_external_gpu.cpp
+      - src/video_core/renderer_vulkan/win7_external_gpu.h
+      - src/video_core/renderer_vulkan/win7_external_gpu_api.h
+      - src/video_core/renderer_vulkan/win7_external_gpu_plugin.cpp
+      - .github/workflows/build-win7-external-host.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-host:
+    name: Build fixed Win7 host and external GPU DLL
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Setup Visual Studio build environment
+        uses: egor-tensin/vs-shell@v2
+        with:
+          arch: x64
+
+      - name: Verify clang-cl toolchain
+        shell: pwsh
+        run: |
+          $clangCl = Get-Command clang-cl.exe -ErrorAction Stop
+          $version = (& $clangCl.Source --version | Out-String)
+          if ($version -notmatch '(?m)^Target:\s+x86_64-pc-windows-msvc\s*$') {
+              throw "Unexpected clang-cl target:`n$version"
+          }
+          $version.TrimEnd() | Write-Host
+
+      - name: Configure Windows 7 external GPU host
+        shell: pwsh
+        run: |
+          $env:SOURCE_DATE_EPOCH = '0'
+          $env:TZ = 'UTC'
+          cmake -S . -B build-win7-external -G Ninja `
+            '-DCMAKE_C_COMPILER=clang-cl' `
+            '-DCMAKE_CXX_COMPILER=clang-cl' `
+            '-DCMAKE_BUILD_TYPE=Release' `
+            '-DENABLE_WINDOWS_7_COMPAT=ON' `
+            '-DENABLE_WINDOWS_7_COMPAT_ONLY=ON' `
+            '-DENABLE_DISCORD_RPC=OFF' `
+            '-DENABLE_UPDATER=OFF' `
+            '-DENABLE_TESTS=OFF'
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+
+      - name: Build fixed host and external GPU DLL
+        shell: pwsh
+        run: |
+          cmake --build build-win7-external --target shadps4 shadps4-win7-gpu --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'External GPU host integration build failed' }
+
+      - name: Validate outputs and DLL export
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'build-win7-external/shadps4.exe'
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'build-win7-external/shadps4-win7-gpu.dll'
+          if (!(Test-Path $exe)) { throw 'shadps4.exe was not produced' }
+          if (!(Test-Path $dll)) { throw 'shadps4-win7-gpu.dll was not produced' }
+          $exports = (& dumpbin.exe /exports $dll | Out-String)
+          if (!$exports.Contains('shadps4_win7_gpu_query_policy')) {
+              throw 'External GPU policy export is missing'
+          }
+
+      - name: Package external GPU base
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'artifact-external-base'
+          Remove-Item -Recurse -Force $output -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          Copy-Item 'build-win7-external/shadps4.exe' (Join-Path $output 'shadps4.exe')
+          Copy-Item 'build-win7-external/shadps4-win7-gpu.dll' (Join-Path $output 'shadps4-win7-gpu.dll')
+          @"
+          shadPS4 Windows 7 external GPU development base
+
+          Keep shadps4.exe fixed while iterating on shadps4-win7-gpu.dll.
+          The base DLL uses ABI 1 and a neutral policy (all experimental flags disabled).
+
+          Initial externally controlled experiment switches:
+          - disable VK_EXT_vertex_input_dynamic_state
+          - disable VK_NV_framebuffer_mixed_samples
+          - disable graphics pipeline optimization
+
+          If the DLL is absent or ABI-incompatible, the executable falls back to the neutral policy.
+          "@ | Out-File -Encoding ascii (Join-Path $output 'EXTERNAL-GPU-README.txt')
+          "host_commit=${{ github.sha }}`nexternal_gpu_abi=1`nbase_policy=neutral" |
+              Out-File -Encoding ascii (Join-Path $output 'BUILD-IDENTITY.txt')
+
+      - name: Upload fixed host base
+        uses: actions/upload-artifact@v7
+        with:
+          name: shadps4-win7-external-base-${{ github.sha }}
+          path: artifact-external-base/
+          if-no-files-found: error
+          retention-days: 30
