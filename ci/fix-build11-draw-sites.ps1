@@ -3,50 +3,59 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $Path = 'src/video_core/renderer_vulkan/vk_rasterizer.cpp'
 $Text = [System.IO.File]::ReadAllText($Path).Replace("`r`n", "`n")
 
-# Make this pass independent of any intermediate placement produced by apply-build11.ps1.
-# Remove all existing Build 11 draw-site calls, then add exactly one direct and one indirect marker.
-$Text = $Text.Replace("    PersistLastSubmittedGraphicsPipeline(pipeline, `"direct`", is_indexed);`n", "")
-$Text = $Text.Replace("    PersistLastSubmittedGraphicsPipeline(pipeline, `"indirect`", is_indexed);`n", "")
+# apply-build11.ps1 may have inserted both provisional markers at the first graphics bind.
+# Remove every provisional Build 11 marker, then reinsert exactly one marker inside each
+# graphics draw function by function boundaries rather than surrounding formatting.
+$Text = [regex]::Replace(
+    $Text,
+    '(?m)^[ \t]*PersistLastSubmittedGraphicsPipeline\(pipeline, "(?:direct|indirect)", is_indexed\);\n?',
+    '')
 
-$DirectOld = @'
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+$Bind = '    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());'
 
-    if (is_indexed) {
-        cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0,
-'@
-$DirectNew = @'
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
-    PersistLastSubmittedGraphicsPipeline(pipeline, "direct", is_indexed);
+function Insert-In-Function([string]$Source, [string]$StartSignature,
+                            [string]$EndSignature, [string]$DrawType) {
+    $Start = $Source.IndexOf($StartSignature)
+    if ($Start -lt 0) {
+        throw "Build 11 draw-site fix failed: function start not found: $StartSignature"
+    }
 
-    if (is_indexed) {
-        cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0,
-'@
-if (-not $Text.Contains($DirectOld)) {
-    throw 'Build 11 draw-site fix failed: unique direct graphics draw site not found'
+    $End = $Source.IndexOf($EndSignature, $Start + $StartSignature.Length)
+    if ($End -lt 0) {
+        throw "Build 11 draw-site fix failed: function end not found after: $StartSignature"
+    }
+
+    $Segment = $Source.Substring($Start, $End - $Start)
+    $BindIndex = $Segment.IndexOf($Bind)
+    if ($BindIndex -lt 0) {
+        throw "Build 11 draw-site fix failed: graphics bind not found inside: $StartSignature"
+    }
+
+    if ($Segment.IndexOf($Bind, $BindIndex + $Bind.Length) -ge 0) {
+        throw "Build 11 draw-site fix failed: multiple graphics binds inside: $StartSignature"
+    }
+
+    $Marker = $Bind + "`n    PersistLastSubmittedGraphicsPipeline(pipeline, `"$DrawType`", is_indexed);"
+    $Segment = $Segment.Substring(0, $BindIndex) + $Marker +
+               $Segment.Substring($BindIndex + $Bind.Length)
+
+    return $Source.Substring(0, $Start) + $Segment + $Source.Substring($End)
 }
-$Text = $Text.Replace($DirectOld, $DirectNew)
 
-$IndirectOld = @'
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+$Text = Insert-In-Function $Text 'void Rasterizer::Draw(bool is_indexed, u32 index_offset)' `
+                                'void Rasterizer::DrawIndirect(' 'direct'
+$Text = Insert-In-Function $Text 'void Rasterizer::DrawIndirect(' `
+                                'void Rasterizer::DispatchDirect()' 'indirect'
 
-    if (is_indexed) {
-        ASSERT(sizeof(VkDrawIndexedIndirectCommand) == stride);
-'@
-$IndirectNew = @'
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
-    PersistLastSubmittedGraphicsPipeline(pipeline, "indirect", is_indexed);
-
-    if (is_indexed) {
-        ASSERT(sizeof(VkDrawIndexedIndirectCommand) == stride);
-'@
-if (-not $Text.Contains($IndirectOld)) {
-    throw 'Build 11 draw-site fix failed: unique indirect graphics draw site not found'
+$DirectCount = ([regex]::Matches(
+    $Text,
+    'PersistLastSubmittedGraphicsPipeline\(pipeline, "direct", is_indexed\);')).Count
+$IndirectCount = ([regex]::Matches(
+    $Text,
+    'PersistLastSubmittedGraphicsPipeline\(pipeline, "indirect", is_indexed\);')).Count
+if ($DirectCount -ne 1 -or $IndirectCount -ne 1) {
+    throw "Build 11 draw-site fix failed verification: direct=$DirectCount indirect=$IndirectCount"
 }
-$Text = $Text.Replace($IndirectOld, $IndirectNew)
 
 [System.IO.File]::WriteAllText($Path, $Text, $Utf8NoBom)
-Write-Host 'Build 11 persistent draw-site placement verified: one direct and one indirect site.'
+Write-Host 'Build 11 persistent draw-site placement verified: direct=1 indirect=1.'
