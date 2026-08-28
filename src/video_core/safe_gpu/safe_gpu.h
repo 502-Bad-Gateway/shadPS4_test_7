@@ -23,7 +23,7 @@ struct SafeGpuGraphicsPipelineInfo {
     bool has_depth{};
     bool has_stencil{};
     bool has_sampled_resources{};
-    // Compatibility input used by the rasterizer's post-create recheck. Build 06's
+    // Compatibility input used by the rasterizer's post-create recheck. Build 08's
     // authoritative pre-create classifier uses the split fields above.
     bool has_depth_or_stencil{};
     bool has_blending{};
@@ -36,12 +36,12 @@ struct SafeGpuGraphicsPipelineInfo {
 };
 
 // Central fail-closed policy boundary for the experimental Windows 7 SafeGPU renderer.
-// Build 06 expands an explicit known-safe pipeline hash and the conservative basic-feature
-// classifier before a guest graphics pipeline may reach Vulkan pipeline creation.
+// Build 08 preserves the known-good control island and admits a conservative depthless,
+// single-target color class before guest graphics pipelines may reach Vulkan creation.
 class SafeGpuGate final {
 public:
     static constexpr std::string_view PolicyVersion() noexcept {
-        return "milestone-2-flat-geometry-v1";
+        return "milestone-2-depthless-color-flat-v1";
     }
 
     static EffectiveGpuMode GetEffectiveMode() noexcept;
