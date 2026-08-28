@@ -2,7 +2,7 @@ name: workflow_shadps4_clone
 
 on:
   push:
-    branches: [shadps4_clone_build06]
+    branches: [shadps4_clone_build08]
     paths:
       - CMakeLists.txt
       - src/**
@@ -16,13 +16,13 @@ permissions:
   contents: read
 
 env:
-  EXPERIMENT_ITERATION: "06"
-  EXPERIMENT_NAME: "flat-geometry"
+  EXPERIMENT_ITERATION: "08"
+  EXPERIMENT_NAME: "depthless-color-flat"
   ARTIFACT_BRANCH: "shadps4_clone"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 SafeGPU Build 06
+    name: Build Windows 7 x64 SafeGPU Build 08
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -117,10 +117,10 @@ jobs:
           Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
           Build Date: $buildDate
           Artifact: W7-$env:ARTIFACT_BRANCH-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
-          SafeGPU: Build 06 flat-color geometry experiment from proven Build 04
+          SafeGPU: Build 08 depthless-color flat-fragment visibility experiment derived from the proven Build 06 flat-fragment path
           NullGPU: preserved and takes precedence
           Compute: skipped in SafeGPU before compute shader/pipeline creation
-          Notes: three Build 04 We Are Doomed control hashes remain native; new candidates require VS+FS, one 1x color target, active depth and no stencil test; guest fragment module is replaced with a constant-color fragment shader; geometry/tessellation stages, storage images, logic-op, compute, and SafeGPU pipeline-cache warm-up remain blocked
+          Notes: three Build 04 We Are Doomed control hashes remain native; new candidates require VS+FS, one 1x color target, no active depth and no stencil test; guest fragment module is replaced with the inherited constant-color fragment shader; geometry/tessellation stages, storage images, logic-op, compute, and SafeGPU pipeline-cache warm-up remain blocked. Runtime pipeline-cache log strings inherited from Build 06 may still say Build 06; BUILD-IDENTITY and SafeGPU policy version identify this artifact as Build 08.
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 
       - name: Upload artifact
