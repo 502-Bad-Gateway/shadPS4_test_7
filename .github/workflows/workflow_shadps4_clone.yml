@@ -35,9 +35,9 @@ jobs:
         shell: pwsh
         run: |
           $patch = Join-Path $env:GITHUB_WORKSPACE 'ci/build09-strip-flat-fragment-resources.patch'
-          git apply --check $patch
+          git apply --recount --check $patch
           if ($LASTEXITCODE -ne 0) { throw 'Build 09 source patch check failed' }
-          git apply $patch
+          git apply --recount $patch
           if ($LASTEXITCODE -ne 0) { throw 'Build 09 source patch apply failed' }
 
       - name: Setup CMake
