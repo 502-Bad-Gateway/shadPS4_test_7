@@ -2,7 +2,7 @@ name: workflow_shadps4_clone
 
 on:
   push:
-    branches: [shadps4_clone_build10]
+    branches: [shadps4_clone_build11]
     paths:
       - CMakeLists.txt
       - src/**
@@ -16,13 +16,13 @@ permissions:
   contents: read
 
 env:
-  EXPERIMENT_ITERATION: "10"
-  EXPERIMENT_NAME: "depthless-flat-no-push-descriptors"
+  EXPERIMENT_ITERATION: "11"
+  EXPERIMENT_NAME: "per-title-profiles-quarantine-last-draw"
   ARTIFACT_BRANCH: "shadps4_clone"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 SafeGPU Build 10
+    name: Build Windows 7 x64 SafeGPU Build 11
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -31,7 +31,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Apply Build 09-r2 and Build 10 source patches
+      - name: Apply Build 09-r2, Build 10 and Build 11 source changes
         shell: pwsh
         run: |
           $r2Patch = Join-Path $env:GITHUB_WORKSPACE 'ci/build09r2-preserve-fragment-binding-slots.patch'
@@ -45,6 +45,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Build 10 source patch check failed' }
           git apply --recount $build10Patch
           if ($LASTEXITCODE -ne 0) { throw 'Build 10 source patch apply failed' }
+
+          & (Join-Path $env:GITHUB_WORKSPACE 'ci/apply-build11.ps1')
+          & (Join-Path $env:GITHUB_WORKSPACE 'ci/fix-build11-draw-sites.ps1')
+
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'Build 11 transformed source failed git diff --check' }
 
       - name: Setup CMake
         uses: lukka/get-cmake@latest
@@ -119,6 +125,8 @@ jobs:
           Copy-Item tools/win7-launcher/LICENSE-GPL-2.0-or-later.txt (Join-Path $output 'LICENSE-win7-launcher-GPL-2.0-or-later.txt')
           Copy-Item ci/build09r2-preserve-fragment-binding-slots.patch (Join-Path $output 'BUILD09-R2-SOURCE.patch')
           Copy-Item ci/build10-disable-push-descriptors.patch (Join-Path $output 'BUILD10-SOURCE.patch')
+          Copy-Item ci/apply-build11.ps1 (Join-Path $output 'BUILD11-SOURCE.ps1')
+          Copy-Item ci/fix-build11-draw-sites.ps1 (Join-Path $output 'BUILD11-DRAWSITE-FIX.ps1')
           $buildDate = (Get-Date).ToUniversalTime().ToString('o')
           @"
           Repository: $env:GITHUB_REPOSITORY
@@ -126,6 +134,7 @@ jobs:
           Baseline: 8ecd4e46e2e6df36901940bed05785665fa5474c
           Build 08 source base: e246c796c91b61e98884cfa01e3c44e6b1287e21
           Build 09-r2 parent: c66643f8d03e77018389740fb2e6d885f18b9d7c
+          Build 10 parent: 7c20d801753ab5a46aec40a31a20af23e8eb0c1f
           Iteration: $env:EXPERIMENT_ITERATION
           Experiment: $env:EXPERIMENT_NAME
           Commit: $env:GITHUB_SHA
@@ -135,14 +144,19 @@ jobs:
           Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
           Build Date: $buildDate
           Artifact: W7-$env:ARTIFACT_BRANCH-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
-          SafeGPU: Build 10 keeps Build 09-r2's Build 08 depthless-color admission policy, constant-color fragment substitution, preserved fragment binding slots and fragment-resource suppression
-          Descriptor delivery: VK_KHR_push_descriptor is forcibly disabled for all SafeGPU graphics pipelines; regular descriptor sets are allocated, updated and bound through the existing DescriptorHeap path
-          Expected forensics: uses_push_descriptors=false on every captured SafeGPU graphics pipeline
-          Vertex resources: Build 08/09-r2 descriptor binding indices remain unchanged
-          We Are Doomed control island: three known-good hashes remain native in shader/pipeline policy; only descriptor delivery changes to regular descriptor sets in SafeGPU
+          SafeGPU: Build 11 introduces automatic per-CUSA policy selection on top of the tested Build 10 behavior
+          Driveclub CUSA00003: retains Build 08 depthless flat-color visibility path and additionally restores native fragment/resource behavior only for the 110 exact graphics pipeline hashes proven non-crashing in Builds 05 and 07
+          Bloodborne CUSA03173 quarantine: 0x41ce00fd9bac4b92
+          DOAX3 CUSA04555 quarantine: 0xae5a792de45aaf76
+          Wipeout CUSA05670 quarantine: 0x2dc86d47c8a5b854
+          We Are Doomed CUSA02394: three known-good control hashes remain native
+          Descriptor delivery: Build 10 regular descriptor-set path retained; VK_KHR_push_descriptor remains disabled in SafeGPU
+          Fragment resources: Build 09-r2 binding-slot preservation/resource suppression retained for flat-substituted pipelines
+          Persistent diagnostic: shader/pipeline_forensics/last_submitted_graphics_pipeline.txt is synchronously rewritten whenever the submitted graphics pipeline hash changes, immediately before direct or indirect draw recording
+          Log diagnostic: [SafeGPU] LAST_SUBMITTED_GRAPHICS records profile/hash/draw type/indexed state
           NullGPU: preserved and takes precedence
           Compute: skipped in SafeGPU before compute shader/pipeline creation
-          Notes: controlled Build 09-r2 follow-up isolating push-descriptor delivery. Exact deltas are included as BUILD09-R2-SOURCE.patch and BUILD10-SOURCE.patch.
+          Source: exact transforms are included as BUILD11-SOURCE.ps1 and BUILD11-DRAWSITE-FIX.ps1
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 
       - name: Upload artifact
