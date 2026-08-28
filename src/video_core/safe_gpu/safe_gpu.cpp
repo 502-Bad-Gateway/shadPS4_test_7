@@ -70,7 +70,7 @@ bool SafeGpuGate::ShouldAllowGraphicsPipelineHash(
     if (mode == EffectiveGpuMode::FullGPU) {
         return true;
     }
-    // Builds 05-07 use the structural classifier as the fail-closed boundary.
+    // Builds 05-08 use the structural classifier as the fail-closed boundary.
     // A zero hash is still rejected as invalid/unclassified input.
     return mode == EffectiveGpuMode::SafeGPU && pipeline_hash != 0;
 }
@@ -105,7 +105,7 @@ bool SafeGpuGate::ShouldAllowGraphicsPipeline(
         return false;
     }
 
-    // PipelineCache performs the complete Build 06 classification before creating a graphics
+    // PipelineCache performs the complete Build 08 classification before creating a graphics
     // pipeline. Rasterizer then performs a post-create recheck using the older aggregate layout,
     // which has no pipeline hash or split sampled/depth/stencil metadata. A zero hash therefore
     // means "already classified by PipelineCache" here; retain the shared structural checks above.
@@ -119,8 +119,11 @@ bool SafeGpuGate::ShouldAllowGraphicsPipeline(
         return !info.has_depth && !info.has_stencil;
     }
 
-    // Build 06: broad simple depth geometry; fragment shading is overridden later.
-    return info.has_depth && !info.has_stencil;
+    // Build 08: broaden the safe visible-output probe to simple depthless color/composition
+    // pipelines. Their guest fragment module is replaced by the inherited constant-color
+    // fragment shader, while depth/stencil, tessellation/geometry, storage-image, logic-op,
+    // multisample, MRT and compute complexity remain outside the allow-list.
+    return !info.has_depth && !info.has_stencil;
 }
 
 bool SafeGpuGate::ShouldAllowCompute() noexcept {
