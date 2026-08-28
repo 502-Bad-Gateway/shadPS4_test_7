@@ -2,7 +2,7 @@ name: workflow_shadps4_clone
 
 on:
   push:
-    branches: [shadps4_clone_build08]
+    branches: [shadps4_clone_build09]
     paths:
       - CMakeLists.txt
       - src/**
@@ -16,13 +16,13 @@ permissions:
   contents: read
 
 env:
-  EXPERIMENT_ITERATION: "08"
-  EXPERIMENT_NAME: "depthless-color-flat"
+  EXPERIMENT_ITERATION: "09"
+  EXPERIMENT_NAME: "depthless-flat-no-fragment-resources"
   ARTIFACT_BRANCH: "shadps4_clone"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 SafeGPU Build 08
+    name: Build Windows 7 x64 SafeGPU Build 09
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -30,6 +30,15 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Apply Build 09 source patch
+        shell: pwsh
+        run: |
+          $patch = Join-Path $env:GITHUB_WORKSPACE 'ci/build09-strip-flat-fragment-resources.patch'
+          git apply --check $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Build 09 source patch check failed' }
+          git apply $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Build 09 source patch apply failed' }
 
       - name: Setup CMake
         uses: lukka/get-cmake@latest
@@ -102,12 +111,13 @@ jobs:
           Copy-Item (Join-Path $env:RUNNER_TEMP 'shadps4-win7-launcher.exe') (Join-Path $output 'shadps4-win7-launcher.exe')
           Copy-Item LICENSE (Join-Path $output 'LICENSE-shadPS4')
           Copy-Item tools/win7-launcher/LICENSE-GPL-2.0-or-later.txt (Join-Path $output 'LICENSE-win7-launcher-GPL-2.0-or-later.txt')
+          Copy-Item ci/build09-strip-flat-fragment-resources.patch (Join-Path $output 'BUILD09-SOURCE.patch')
           $buildDate = (Get-Date).ToUniversalTime().ToString('o')
           @"
           Repository: $env:GITHUB_REPOSITORY
           Branch: $env:GITHUB_REF_NAME
           Baseline: 8ecd4e46e2e6df36901940bed05785665fa5474c
-          Base Commit: 145e0d74283a287f4f6c0aa609f7528d52f47a47
+          Base Commit: e246c796c91b61e98884cfa01e3c44e6b1287e21
           Iteration: $env:EXPERIMENT_ITERATION
           Experiment: $env:EXPERIMENT_NAME
           Commit: $env:GITHUB_SHA
@@ -117,10 +127,12 @@ jobs:
           Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
           Build Date: $buildDate
           Artifact: W7-$env:ARTIFACT_BRANCH-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
-          SafeGPU: Build 08 depthless-color flat-fragment visibility experiment derived from the proven Build 06 flat-fragment path
+          SafeGPU: Build 09 keeps Build 08's depthless-color visibility class and constant-color fragment substitution
+          Fragment resources: stripped for flat-substituted non-control pipelines; guest FS buffers, images, samplers and user-data are omitted from descriptor-layout creation and per-draw binding
+          We Are Doomed control island: three known-good pipeline hashes remain native and retain their original fragment resources
           NullGPU: preserved and takes precedence
           Compute: skipped in SafeGPU before compute shader/pipeline creation
-          Notes: three Build 04 We Are Doomed control hashes remain native; new candidates require VS+FS, one 1x color target, no active depth and no stencil test; guest fragment module is replaced with the inherited constant-color fragment shader; geometry/tessellation stages, storage images, logic-op, compute, and SafeGPU pipeline-cache warm-up remain blocked. Runtime pipeline-cache log strings inherited from Build 06 may still say Build 06; BUILD-IDENTITY and SafeGPU policy version identify this artifact as Build 08.
+          Notes: this is a controlled Build 08 follow-up intended to test whether unused guest fragment descriptors/resources are responsible for the Win7 NVIDIA nvoglv64.dll crash path. The exact source delta is included as BUILD09-SOURCE.patch.
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 
       - name: Upload artifact
