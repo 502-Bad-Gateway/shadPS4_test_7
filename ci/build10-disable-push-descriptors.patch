@@ -1,0 +1,26 @@
+diff --git a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+--- a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
++++ b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+@@ -15,6 +15,7 @@
+ #include "video_core/renderer_vulkan/vk_instance.h"
+ #include "video_core/renderer_vulkan/vk_scheduler.h"
+ #include "video_core/renderer_vulkan/vk_shader_util.h"
++#include "video_core/safe_gpu/safe_gpu.h"
+ 
+ namespace Vulkan {
+ 
+@@ -754,7 +755,14 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
+             });
+         }
+     }
+-    uses_push_descriptors = binding < instance.MaxPushDescriptors();
++    // Build 10: keep Build 09-r2's exact descriptor layout/binding numbers, but force SafeGPU
++    // graphics through ordinary allocated descriptor sets. This isolates VK_KHR_push_descriptor
++    // from every other Build 09-r2 behavior, including the three native control pipelines.
++    const bool force_regular_descriptor_sets = VideoCore::SafeGpuGate::IsEnabled();
++    uses_push_descriptors =
++        !force_regular_descriptor_sets && binding < instance.MaxPushDescriptors();
++
+     const auto flags = uses_push_descriptors
+                            ? vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR
+                            : vk::DescriptorSetLayoutCreateFlagBits{};
