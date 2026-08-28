@@ -1,0 +1,45 @@
+diff --git a/src/video_core/renderer_vulkan/vk_rasterizer.cpp b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -590,13 +590,40 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
+ 
+     // Bind resource buffers and textures.
+     Shader::Backend::Bindings binding{};
+     push_data = MakeUserData(liverpool->regs);
++
++    // Build 09-r2: for flat-substituted SafeGPU fragment pipelines, preserve the exact guest
++    // descriptor binding numbers but do not touch any guest fragment resources. The original
++    // fragment metadata remains in the pipeline layout so subsequent stages (notably Vertex)
++    // retain the same binding indices their SPIR-V was compiled against.
++    bool strip_flat_fragment_resources = false;
++    if (safe_gpu_active && !pipeline->IsCompute()) {
++        const auto* graphics_pipeline = static_cast<const GraphicsPipeline*>(pipeline);
++        const u64 pipeline_hash =
++            std::hash<GraphicsPipelineKey>{}(graphics_pipeline->GetGraphicsKey());
++        strip_flat_fragment_resources =
++            VideoCore::SafeGpuGate::ShouldUseFlatFragment(pipeline_hash);
++    }
++
+     for (const auto* stage : pipeline->GetStages()) {
+         if (!stage) {
+             continue;
+         }
++        if (strip_flat_fragment_resources &&
++            stage->l_stage == Shader::LogicalStage::Fragment) {
++            // Advance the binding cursors exactly as normal fragment binding would, without
++            // creating descriptor writes, resolving guest buffers/images/samplers, transitioning
++            // textures, or copying fragment user-data into push constants.
++            binding.buffer += static_cast<u32>(stage->buffers.size());
++            binding.unified += static_cast<u32>(stage->buffers.size());
++            for (const auto& image : stage->images) {
++                binding.unified += image.NumBindings(*stage);
++            }
++            binding.unified += static_cast<u32>(stage->samplers.size());
++            binding.user_data += stage->ud_mask.NumRegs();
++            continue;
++        }
+         set_writes.resize(set_writes.size() + stage->buffers.size() + stage->images.size() +
+                           stage->samplers.size());
+         stage->PushUd(binding, push_data);
+         BindBuffers(*stage, binding, push_data);
+         BindTextures(*stage, binding);
