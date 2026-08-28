@@ -1,0 +1,151 @@
+diff --git a/src/video_core/renderer_vulkan/vk_pipeline_cache.h b/src/video_core/renderer_vulkan/vk_pipeline_cache.h
+--- a/src/video_core/renderer_vulkan/vk_pipeline_cache.h
++++ b/src/video_core/renderer_vulkan/vk_pipeline_cache.h
+@@ -141,6 +141,9 @@ private:
+     ComputePipelineKey compute_key{};
+     u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
+     vk::ShaderModule safe_gpu_flat_fragment_module{};
++    // Build 09 owns resource-free fragment metadata for every flat-substituted pipeline so
++    // GraphicsPipeline and Rasterizer never see the guest fragment descriptors for those draws.
++    std::vector<std::unique_ptr<Shader::Info>> safe_gpu_flat_fragment_infos{};
+ 
+ #ifdef SHADPS4_WINDOWS_7_COMPAT
+     std::atomic<u64> pipeline_forensics_sequence{};
+diff --git a/src/video_core/renderer_vulkan/vk_pipeline_cache.cpp b/src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
+--- a/src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
++++ b/src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
+@@ -324,7 +324,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
+ #endif
+     if (VideoCore::SafeGpuGate::IsEnabled()) {
+         LOG_INFO(Render_Vulkan,
+-                 "[SafeGPU] SKIP pipeline cache warm-up for Build 06; cached graphics/compute "
++                 "[SafeGPU] SKIP pipeline cache warm-up for Build 09; cached graphics/compute "
+                  "pipelines must not bypass the fail-closed policy");
+     } else {
+         WarmUp();
+@@ -441,7 +441,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
+         if (VideoCore::SafeGpuGate::IsEnabled() &&
+             !VideoCore::SafeGpuGate::ShouldAllowGraphicsPipelineHash(pipeline_hash)) {
+             LOG_INFO(Render_Vulkan,
+-                     "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 06 candidate prefilter "
++                     "[SafeGPU] SKIP graphics pipeline hash={:#x} by Build 09 candidate prefilter "
+                      "before vkCreateGraphicsPipelines",
+                      pipeline_hash);
+             infos.fill(nullptr);
+@@ -485,7 +485,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
+             if (!VideoCore::SafeGpuGate::ShouldAllowGraphicsPipeline(safe_info)) {
+                 LOG_INFO(Render_Vulkan,
+                          "[SafeGPU] SKIP candidate graphics pipeline hash={:#x}; "
+-                         "Build 06 geometry-first feature gate rejected it before "
++                         "Build 09 depthless-color feature gate rejected it before "
+                          "vkCreateGraphicsPipelines",
+                          pipeline_hash);
+                 infos.fill(nullptr);
+@@ -496,27 +496,48 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
+                 return nullptr;
+             }
+             LOG_INFO(Render_Vulkan,
+-                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 06 candidate prefilter "
+-                     "and geometry-first feature gate before vkCreateGraphicsPipelines",
++                     "[SafeGPU] ALLOW graphics pipeline hash={:#x} by Build 09 candidate prefilter "
++                     "and depthless-color feature gate before vkCreateGraphicsPipelines",
+                      pipeline_hash);
+         }
+-            if (VideoCore::SafeGpuGate::ShouldUseFlatFragment(pipeline_hash)) {
+-        if (!safe_gpu_flat_fragment_module) {
+-            constexpr std::string_view FlatFragmentSource = R"glsl(
++        if (VideoCore::SafeGpuGate::ShouldUseFlatFragment(pipeline_hash)) {
++            const auto fs_index = static_cast<u32>(LogicalStage::Fragment);
++            const auto* guest_fs = infos[fs_index];
++            if (!guest_fs) {
++                LOG_WARNING(Render_Vulkan,
++                            "[SafeGPU] Build 09 rejected flat-fragment pipeline hash={:#x}: "
++                            "missing guest fragment metadata",
++                            pipeline_hash);
++                infos.fill(nullptr);
++                modules.fill(nullptr);
++                fetch_shader.reset();
++                return nullptr;
++            }
++
++            if (!safe_gpu_flat_fragment_module) {
++                constexpr std::string_view FlatFragmentSource = R"glsl(
+ #version 450
+ layout(location = 0) out vec4 out_color;
+ void main() {
+     out_color = vec4(0.72, 0.78, 0.86, 1.0);
+ }
+ )glsl";
+-            safe_gpu_flat_fragment_module =
+-                Compile(FlatFragmentSource, vk::ShaderStageFlagBits::eFragment,
+-                        instance.GetDevice());
++                safe_gpu_flat_fragment_module =
++                    Compile(FlatFragmentSource, vk::ShaderStageFlagBits::eFragment,
++                            instance.GetDevice());
++            }
++
++            // The flat shader consumes no fragment buffers, images, samplers or user data. Keep
++            // only identity/stage metadata so descriptor-layout creation and per-draw resource
++            // binding omit the guest fragment resource path entirely.
++            auto flat_info = std::make_unique<Shader::Info>();
++            flat_info->stage = guest_fs->stage;
++            flat_info->l_stage = guest_fs->l_stage;
++            flat_info->pgm_hash = guest_fs->pgm_hash;
++            flat_info->mrt_mask = guest_fs->mrt_mask;
++            infos[fs_index] = flat_info.get();
++            safe_gpu_flat_fragment_infos.emplace_back(std::move(flat_info));
++            modules[fs_index] = safe_gpu_flat_fragment_module;
++
++            LOG_INFO(Render_Vulkan,
++                     "[SafeGPU] Build 09 flat fragment override with guest FS resources stripped "
++                     "hash={:#x}",
++                     pipeline_hash);
+         }
+-        modules[static_cast<u32>(LogicalStage::Fragment)] =
+-            safe_gpu_flat_fragment_module;
+-        LOG_INFO(Render_Vulkan,
+-                 "[SafeGPU] Build 06 flat-geometry fragment override hash={:#x}",
+-                 pipeline_hash);
+-    }
+         LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
+ 
+         GraphicsPipeline::SerializationSupport sdata{};
+@@ -553,7 +574,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
+ const ComputePipeline* PipelineCache::GetComputePipeline() {
+     if (VideoCore::SafeGpuGate::IsEnabled()) {
+         LOG_INFO(Render_Vulkan,
+-                 "[SafeGPU] SKIP compute pipeline before shader/pipeline creation by Build 06 policy");
++                 "[SafeGPU] SKIP compute pipeline before shader/pipeline creation by Build 09 policy");
+         return nullptr;
+     }
+     if (!RefreshComputeKey()) {
+diff --git a/src/video_core/safe_gpu/safe_gpu.h b/src/video_core/safe_gpu/safe_gpu.h
+--- a/src/video_core/safe_gpu/safe_gpu.h
++++ b/src/video_core/safe_gpu/safe_gpu.h
+@@ -22,8 +22,8 @@ struct SafeGpuGraphicsPipelineInfo {
+     bool has_depth{};
+     bool has_stencil{};
+     bool has_sampled_resources{};
+-    // Compatibility input used by the rasterizer's post-create recheck. Build 08's
+-    // authoritative pre-create classifier uses the split fields above.
++    // Compatibility input used by the rasterizer's post-create recheck. Build 09 keeps
++    // Build 08's authoritative pre-create depthless-color classifier unchanged.
+     bool has_depth_or_stencil{};
+     bool has_blending{};
+     bool has_logic_op{};
+@@ -36,11 +36,12 @@ struct SafeGpuGraphicsPipelineInfo {
+ };
+ 
+ // Central fail-closed policy boundary for the experimental Windows 7 SafeGPU renderer.
+-// Build 08 preserves the known-good control island and admits a conservative depthless,
+-// single-target color class before guest graphics pipelines may reach Vulkan creation.
++// Build 09 preserves Build 08's known-good control island and depthless single-target color
++// class, while flat-substituted fragment pipelines discard their guest fragment resources.
+ class SafeGpuGate final {
+ public:
+     static constexpr std::string_view PolicyVersion() noexcept {
+-        return "milestone-2-depthless-color-flat-v1";
++        return "milestone-2-depthless-color-flat-no-fs-resources-v1";
+     }
+ 
+     static EffectiveGpuMode GetEffectiveMode() noexcept;
