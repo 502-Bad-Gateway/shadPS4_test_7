@@ -1,0 +1,231 @@
+name: Build shadps4_scan Win7 Vulkan diagnostics
+
+on:
+  push:
+    branches: [shadps4_scan]
+    paths:
+      - CMakeLists.txt
+      - src/**
+      - tools/vulkan-scan/**
+      - .github/workflows/workflow_shadps4_scan.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-scan:
+    name: Build Win7 Vulkan/NVIDIA scan package
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Setup Visual Studio build environment
+        uses: egor-tensin/vs-shell@v2
+        with:
+          arch: x64
+
+      - name: Build Vulkan 1.2 Windows 7 validation layer
+        shell: pwsh
+        run: |
+          $validationRoot = Join-Path $env:RUNNER_TEMP 'Vulkan-ValidationLayers-v1.2.198'
+          Remove-Item -Recurse -Force $validationRoot -ErrorAction SilentlyContinue
+          git clone --depth 1 --branch v1.2.198 `
+            https://github.com/KhronosGroup/Vulkan-ValidationLayers.git $validationRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers checkout failed' }
+          $env:CFLAGS = '/MT'
+          $env:CXXFLAGS = '/MT'
+          Push-Location $validationRoot
+          try {
+              $updateDeps = Join-Path $validationRoot 'scripts/update_deps.py'
+              $updateText = Get-Content -Raw $updateDeps
+              $cmakeCommand = "            'cmake', self.repo_dir,"
+              $cmakeCommandCount = ([regex]::Matches(
+                  $updateText, [regex]::Escape($cmakeCommand))).Count
+              if ($cmakeCommandCount -ne 1) {
+                  throw 'Unexpected Vulkan Validation Layers update_deps.py layout'
+              }
+              $updateText = $updateText.Replace(
+                  $cmakeCommand,
+                  $cmakeCommand + [Environment]::NewLine +
+                  "            '-DCMAKE_BUILD_TYPE=Release'," +
+                  [Environment]::NewLine +
+                  "            '-DCMAKE_POLICY_VERSION_MINIMUM=3.5'," +
+                  [Environment]::NewLine +
+                  "            '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'," +
+                  [Environment]::NewLine +
+                  "            '-DCMAKE_C_FLAGS_RELEASE=/MT'," +
+                  [Environment]::NewLine +
+                  "            '-DCMAKE_CXX_FLAGS_RELEASE=/MT',")
+              Set-Content -Encoding utf8 $updateDeps $updateText
+              python scripts/update_deps.py --dir external --arch x64 --config release `
+                --generator Ninja --optional tests
+              if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers dependency build failed' }
+              cmake -C external/helper.cmake -S . -B build -G Ninja `
+                '-DCMAKE_BUILD_TYPE=Release' `
+                '-DBUILD_TESTS=OFF' `
+                '-DBUILD_WERROR=OFF' `
+                '-DBUILD_LAYER_SUPPORT_FILES=OFF' `
+                '-DCMAKE_SYSTEM_VERSION=6.1' `
+                '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded' `
+                '-DCMAKE_C_FLAGS_RELEASE=/MT' `
+                '-DCMAKE_CXX_FLAGS_RELEASE=/MT'
+              if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers configure failed' }
+              cmake --build build --target install --parallel $env:NUMBER_OF_PROCESSORS
+              if ($LASTEXITCODE -ne 0) { throw 'Vulkan Validation Layers build failed' }
+          } finally {
+              Pop-Location
+          }
+          $layerDll = Get-ChildItem $validationRoot -Recurse -Filter 'VkLayer_khronos_validation.dll' |
+              Where-Object { $_.FullName -match '\\(Release|install|lib|bin)\\' } |
+              Select-Object -First 1
+          $layerJson = Get-ChildItem $validationRoot -Recurse -Filter 'VkLayer_khronos_validation.json' |
+              Select-Object -First 1
+          if (!$layerDll -or !$layerJson) {
+              throw 'Vulkan Validation Layers build did not produce the validation DLL and manifest'
+          }
+          "VVL_ROOT=$validationRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VVL_DLL=$($layerDll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VVL_JSON=$($layerJson.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure Windows 7 shadps4 scan build
+        shell: pwsh
+        run: |
+          $env:SOURCE_DATE_EPOCH = '0'
+          $env:TZ = 'UTC'
+          cmake -S . -B build-scan -G Ninja `
+            '-DCMAKE_C_COMPILER=clang-cl' `
+            '-DCMAKE_CXX_COMPILER=clang-cl' `
+            '-DCMAKE_BUILD_TYPE=Release' `
+            '-DENABLE_WINDOWS_7_COMPAT=ON' `
+            '-DENABLE_WINDOWS_7_COMPAT_ONLY=ON' `
+            '-DENABLE_DISCORD_RPC=OFF' `
+            '-DENABLE_UPDATER=OFF' `
+            '-DENABLE_TESTS=OFF'
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+
+      - name: Build instrumented shadps4
+        shell: pwsh
+        run: |
+          cmake --build build-scan --target shadps4 --parallel $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { throw 'shadps4 scan build failed' }
+
+      - name: Build standalone Vulkan scanner
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'shadps4-vulkan-scan.exe'
+          clang-cl.exe /nologo /std:c++17 /O2 /EHsc /MT `
+            /D_WIN32_WINNT=0x0601 /DWINVER=0x0601 `
+            /I (Join-Path $env:GITHUB_WORKSPACE 'externals/vulkan-headers/include') `
+            (Join-Path $env:GITHUB_WORKSPACE 'tools/vulkan-scan/main.cpp') `
+            /Fe:$out /link /SUBSYSTEM:CONSOLE,6.01 version.lib advapi32.lib
+          if ($LASTEXITCODE -ne 0) { throw 'standalone Vulkan scanner build failed' }
+          if (!(Test-Path $out)) { throw 'standalone Vulkan scanner was not produced' }
+          "SCAN_EXE=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Package diagnostic artifact
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'artifact'
+          Remove-Item -Recurse -Force $output -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+
+          $emulator = Join-Path $env:GITHUB_WORKSPACE 'build-scan/shadps4.exe'
+          if (!(Test-Path $emulator)) { throw 'shadps4.exe was not produced' }
+          Copy-Item $emulator (Join-Path $output 'shadps4_scan.exe')
+          Copy-Item $env:SCAN_EXE (Join-Path $output 'shadps4-vulkan-scan.exe')
+          Copy-Item LICENSE (Join-Path $output 'LICENSE-shadPS4')
+
+          $layerDirectory = Join-Path $output 'vulkan/explicit_layer.d'
+          New-Item -ItemType Directory -Force -Path $layerDirectory | Out-Null
+          Copy-Item $env:VVL_DLL (Join-Path $layerDirectory 'VkLayer_khronos_validation.dll')
+          Copy-Item $env:VVL_JSON (Join-Path $layerDirectory 'VkLayer_khronos_validation.json')
+          Copy-Item (Join-Path $env:VVL_ROOT 'LICENSE.txt') `
+              (Join-Path $output 'LICENSE-Vulkan-ValidationLayers-Apache-2.0.txt')
+
+          @"
+          shadps4_scan - Windows 7 / NVIDIA / Vulkan diagnostic package
+
+          Purpose
+          -------
+          This branch is diagnostic-only. It is intended to identify exactly which Vulkan 1.3
+          assumptions fail on Windows 7 with the legacy NVIDIA Vulkan stack, without treating an
+          experimental renderer workaround as a solution.
+
+          1. Run shadps4-vulkan-scan.exe first.
+             It creates vulkan_scan.txt beside the executable. The scan records:
+             - exact Windows version and Vulkan environment variables
+             - Vulkan loader DLL path/version and loader API version
+             - Khronos Vulkan ICD/layer registry registrations
+             - all instance layers/extensions and spec versions
+             - physical device, NVIDIA driver/API versions, UUIDs and subgroup properties
+             - core Vulkan features, Vulkan 1.1/1.2 features, memory, queues and format flags
+             - Vulkan-1.3-to-extension bridge availability
+             - the exact extension/feature bundle required by the shadPS4 Win7 Vulkan 1.2 path
+             - a real vkCreateDevice probe of that required bundle
+             - KHR/EXT and core command entry-point resolution after the probe
+             - the in-process nvoglv64.dll path and file version
+
+          2. Run shadps4_scan.exe with null_gpu=false on a failing title and on We Are Doomed.
+             This executable preserves the compatibility baseline but expands Win7 Vulkan forensic
+             events with monotonic microsecond timestamps, thread tokens, operation names, results,
+             and Vulkan loader/layer/ICD environment state.
+
+          Return:
+          - vulkan_scan.txt
+          - the normal test-results archive for each tested game
+          - user/shader/pipeline_forensics (if created)
+          - any validation-layer output/log generated by the run
+
+          The most useful first comparison is Bloodborne or Wipeout versus We Are Doomed.
+          "@ | Out-File -Encoding ascii (Join-Path $output 'SHADPS4-SCAN-README.txt')
+
+          @"
+          branch=shadps4_scan
+          base=win7-v1-compat-only
+          purpose=vulkan-nvidia-diagnostics
+          target_os=windows-7-x64
+          target_gpu_family=nvidia-pascal
+          target_test_gpu=gtx-1080-ti
+          target_driver=472.12
+          vulkan_target=1.2-with-1.3-extension-bridges
+          validation_layer=VK_LAYER_KHRONOS_validation-v1.2.198-app-local
+          renderer_experiment=false
+          standalone_capability_scanner=true
+          in_game_forensic_timestamps=true
+          "@ | Out-File -Encoding ascii (Join-Path $output 'BUILD-IDENTITY.txt')
+
+          foreach ($exe in @('shadps4_scan.exe', 'shadps4-vulkan-scan.exe')) {
+              $imports = (& dumpbin.exe /imports (Join-Path $output $exe) | Out-String)
+              foreach ($forbidden in @('VirtualAlloc2', 'CreateFileMapping2', 'MapViewOfFile3',
+                                       'UnmapViewOfFile2', 'SetThreadDescription',
+                                       'GetThreadDescription', 'GetSystemTimePreciseAsFileTime')) {
+                  if ($imports -match [regex]::Escape($forbidden)) {
+                      throw "Forbidden post-Win7 static import in $exe: $forbidden"
+                  }
+              }
+          }
+
+          $hashLines = @(Get-ChildItem $output -File |
+              Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
+              ForEach-Object {
+                  $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+                  "$hash  $($_.Name)"
+              } | Sort-Object)
+          $hashLines | Out-File -Encoding ascii (Join-Path $output 'SHA256SUMS.txt')
+
+      - name: Upload shadps4_scan artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: shadps4_scan-${{ github.sha }}
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
