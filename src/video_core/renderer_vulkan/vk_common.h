@@ -4,7 +4,11 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <functional>
 #include <string_view>
+#include <thread>
 
 #include "common/logging/log.h"
 #include "common/types.h"
@@ -51,17 +55,61 @@
 namespace Vulkan::Win7Forensics {
 
 inline std::atomic<u64> event_sequence{};
+inline std::atomic<bool> scan_announced{};
+inline const auto scan_epoch = std::chrono::steady_clock::now();
+
+inline u64 TimestampUs() {
+    return static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                std::chrono::steady_clock::now() - scan_epoch)
+                                .count());
+}
+
+inline size_t ThreadToken() {
+    return std::hash<std::thread::id>{}(std::this_thread::get_id());
+}
+
+inline void AnnounceScanOnce() {
+    bool expected = false;
+    if (!scan_announced.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
+        return;
+    }
+    LOG_INFO(Render_Vulkan,
+             "shadps4_scan forensic trace active: Vulkan call ordering, result, timestamp and "
+             "thread token capture enabled");
+    static constexpr std::array env_names = {
+        "VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "VK_ICD_FILENAMES", "VK_DRIVER_FILES",
+        "VK_LOADER_DEBUG", "VK_ADD_DRIVER_FILES", "VK_LOADER_LAYERS_ENABLE",
+        "VK_LOADER_LAYERS_DISABLE",
+    };
+    for (const char* name : env_names) {
+        if (const char* value = std::getenv(name); value != nullptr) {
+            LOG_INFO(Render_Vulkan, "shadps4_scan env {}={}", name, value);
+        } else {
+            LOG_INFO(Render_Vulkan, "shadps4_scan env {}=<unset>", name);
+        }
+    }
+}
 
 inline u64 Begin(std::string_view operation, std::string_view detail = {}) {
+    AnnounceScanOnce();
     const u64 event = event_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
-    LOG_INFO(Render_Vulkan, "Win7 Vulkan forensics BEGIN event={} operation={} detail={}", event,
-             operation, detail);
+    LOG_INFO(Render_Vulkan,
+             "Win7 Vulkan forensics BEGIN event={} timestamp_us={} thread={} operation={} detail={}",
+             event, TimestampUs(), ThreadToken(), operation, detail);
     return event;
 }
 
 inline void End(const u64 event, std::string_view operation, std::string_view result = {}) {
-    LOG_INFO(Render_Vulkan, "Win7 Vulkan forensics END event={} operation={} result={}", event,
-             operation, result);
+    LOG_INFO(Render_Vulkan,
+             "Win7 Vulkan forensics END event={} timestamp_us={} thread={} operation={} result={}",
+             event, TimestampUs(), ThreadToken(), operation, result);
+}
+
+inline void Checkpoint(std::string_view operation, std::string_view detail = {}) {
+    AnnounceScanOnce();
+    LOG_INFO(Render_Vulkan,
+             "Win7 Vulkan forensics CHECKPOINT timestamp_us={} thread={} operation={} detail={}",
+             TimestampUs(), ThreadToken(), operation, detail);
 }
 
 } // namespace Vulkan::Win7Forensics
