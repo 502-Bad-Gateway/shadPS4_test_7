@@ -1,4 +1,4 @@
-# Build 17 Driveclub compute workload forensics; compute execution remains disabled
+# Build 17-r2 Driveclub compute workload forensics; scalar transform fix, compute remains disabled
 name: workflow_shadps4_clone
 
 on:
@@ -19,13 +19,13 @@ permissions:
   contents: read
 
 env:
-  EXPERIMENT_ITERATION: "17"
-  EXPERIMENT_NAME: "driveclub-compute-forensics"
+  EXPERIMENT_ITERATION: "17-r2"
+  EXPERIMENT_NAME: "driveclub-compute-forensics-transform-fix"
   ARTIFACT_BRANCH: "shadps4_clone"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 SafeGPU Build 17
+    name: Build Windows 7 x64 SafeGPU Build 17-r2
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -34,7 +34,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Apply Build 09-r2 through Build 17 source changes
+      - name: Apply Build 09-r2 through Build 17-r2 source changes
         shell: pwsh
         run: |
           $r2Patch = Join-Path $env:GITHUB_WORKSPACE 'ci/build09r2-preserve-fragment-binding-slots.patch'
@@ -57,10 +57,11 @@ jobs:
           & (Join-Path $env:GITHUB_WORKSPACE 'experiments/safegpu/apply-build15.ps1')
           & (Join-Path $env:GITHUB_WORKSPACE 'experiments/build16/apply-build16.ps1')
           & (Join-Path $env:GITHUB_WORKSPACE 'experiments/build16/apply-build16-r2.ps1')
+          & (Join-Path $env:GITHUB_WORKSPACE 'build17-r2-prepare.ps1')
           & (Join-Path $env:GITHUB_WORKSPACE 'experiments/build17/apply-build17.ps1')
 
           git diff --check
-          if ($LASTEXITCODE -ne 0) { throw 'Build 17 transformed source failed git diff --check' }
+          if ($LASTEXITCODE -ne 0) { throw 'Build 17-r2 transformed source failed git diff --check' }
 
       - name: Setup CMake
         uses: lukka/get-cmake@latest
@@ -144,6 +145,7 @@ jobs:
           Copy-Item experiments/build16/apply-build16.ps1 (Join-Path $output 'BUILD16-SOURCE.ps1')
           Copy-Item experiments/build16/apply-build16-r2.ps1 (Join-Path $output 'BUILD16-R2-SOURCE.ps1')
           Copy-Item experiments/build17/apply-build17.ps1 (Join-Path $output 'BUILD17-SOURCE.ps1')
+          Copy-Item build17-r2-prepare.ps1 (Join-Path $output 'BUILD17-R2-PREPARE.ps1')
           $buildDate = (Get-Date).ToUniversalTime().ToString('o')
           @"
           Repository: $env:GITHUB_REPOSITORY
@@ -159,6 +161,7 @@ jobs:
           Build 15 launch continuation: 94ac081180b3c8bbd188755ec22c71b8902939d2
           Build 16 launch continuation: dd661029f8cfa13f5cf69edf4bb5a301a4ebec3e
           Build 16-r2 launch continuation: e587884da61a90276a6b4eae8dda3ff9f91823dc
+          Build 17 failed launch continuation: 79a99138471b91c4f4188cc88f4ceaabb84b9d84
           Iteration: $env:EXPERIMENT_ITERATION
           Experiment: $env:EXPERIMENT_NAME
           Commit: $env:GITHUB_SHA
@@ -168,7 +171,8 @@ jobs:
           Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
           Build Date: $buildDate
           Artifact: W7-$env:ARTIFACT_BRANCH-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
-          SafeGPU: Build 17 is a diagnostics-only BUILD 16-r2 continuation on the long-lived shadps4_clone branch; graphics admission/rendering policy is unchanged
+          SafeGPU: Build 17-r2 is the same diagnostics-only BUILD 16-r2 continuation; graphics admission/rendering policy is unchanged
+          Transform correction: Count-Occurrences now uses a non-emitting scalar increment so the exact two graphics/async direct and two indirect PM4 parser sites verify correctly
           Driveclub compute forensics: skipped direct/indirect workloads are aggregated by OrbShdr shader hash, CRC, shader address/size, dispatch dimensions, queue, thread/LDS settings, PM4 command address, indirect argument address, user data and preceding graphics-pipeline hash
           Runtime diagnostic output: shader/pipeline_forensics/compute_forensics/compute_dispatches.csv plus raw GCN binaries under compute_forensics/compute_shaders
           Persistence: aggregate CSV is rewritten for new signatures and sampled event-count milestones so useful data survives the known no-save Driveclub texture-cache assertion
@@ -184,7 +188,7 @@ jobs:
           We Are Doomed CUSA02394: three known-good control hashes remain native
           Persistent graphics diagnostic: BUILD 11 last-submitted graphics pipeline tracking retained unchanged
           NullGPU: preserved and takes precedence
-          Source: exact BUILD 17 transform is included as BUILD17-SOURCE.ps1
+          Source: BUILD17-SOURCE.ps1 is the corrected runtime transform and BUILD17-R2-PREPARE.ps1 documents the scalar transform fix
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 
       - name: Upload artifact
