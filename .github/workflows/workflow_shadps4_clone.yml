@@ -1,4 +1,4 @@
-# Build 14 Driveclub native all-admitted depthless fragment/resource probe
+# Build 15 Driveclub restore proven native depth pipelines
 name: workflow_shadps4_clone
 
 on:
@@ -10,6 +10,7 @@ on:
       - tests/**
       - tools/win7-launcher/**
       - ci/**
+      - experiments/safegpu/**
       - .github/workflows/workflow_shadps4_clone.yml
   workflow_dispatch:
 
@@ -17,13 +18,13 @@ permissions:
   contents: read
 
 env:
-  EXPERIMENT_ITERATION: "14"
-  EXPERIMENT_NAME: "driveclub-native-all-admitted-depthless"
+  EXPERIMENT_ITERATION: "15"
+  EXPERIMENT_NAME: "driveclub-restore-proven-depth"
   ARTIFACT_BRANCH: "shadps4_clone"
 
 jobs:
   build-win7-x64:
-    name: Build Windows 7 x64 SafeGPU Build 14
+    name: Build Windows 7 x64 SafeGPU Build 15
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -32,7 +33,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Apply Build 09-r2 through Build 14 source changes
+      - name: Apply Build 09-r2 through Build 15 source changes
         shell: pwsh
         run: |
           $r2Patch = Join-Path $env:GITHUB_WORKSPACE 'ci/build09r2-preserve-fragment-binding-slots.patch'
@@ -52,9 +53,10 @@ jobs:
           & (Join-Path $env:GITHUB_WORKSPACE 'ci/apply-build12.ps1')
           & (Join-Path $env:GITHUB_WORKSPACE 'ci/apply-build13.ps1')
           & (Join-Path $env:GITHUB_WORKSPACE 'ci/apply-build14.ps1')
+          & (Join-Path $env:GITHUB_WORKSPACE 'experiments/safegpu/apply-build15.ps1')
 
           git diff --check
-          if ($LASTEXITCODE -ne 0) { throw 'Build 14 transformed source failed git diff --check' }
+          if ($LASTEXITCODE -ne 0) { throw 'Build 15 transformed source failed git diff --check' }
 
       - name: Setup CMake
         uses: lukka/get-cmake@latest
@@ -134,6 +136,7 @@ jobs:
           Copy-Item ci/apply-build12.ps1 (Join-Path $output 'BUILD12-SOURCE.ps1')
           Copy-Item ci/apply-build13.ps1 (Join-Path $output 'BUILD13-SOURCE.ps1')
           Copy-Item ci/apply-build14.ps1 (Join-Path $output 'BUILD14-SOURCE.ps1')
+          Copy-Item experiments/safegpu/apply-build15.ps1 (Join-Path $output 'BUILD15-SOURCE.ps1')
           $buildDate = (Get-Date).ToUniversalTime().ToString('o')
           @"
           Repository: $env:GITHUB_REPOSITORY
@@ -145,6 +148,7 @@ jobs:
           Build 11 final parent: 81b53122760c949aee1b0529c9632585d021e38d
           Build 12 launch parent: 3cdc4069bf1cda5c2ae5fdb45838b429e180b1a2
           Build 13 successful continuation: 23d14621b81e177e89bab6171868185b959ee562
+          Build 14 successful continuation: 9cc48cfa39283e97ee97e6b66ccb9fffddc6f0a7
           Iteration: $env:EXPERIMENT_ITERATION
           Experiment: $env:EXPERIMENT_NAME
           Commit: $env:GITHUB_SHA
@@ -154,10 +158,11 @@ jobs:
           Workflow Attempt: $env:GITHUB_RUN_ATTEMPT
           Build Date: $buildDate
           Artifact: W7-$env:ARTIFACT_BRANCH-$env:EXPERIMENT_ITERATION-$env:EXPERIMENT_NAME
-          SafeGPU: Build 14 is a one-axis BUILD 13 continuation on the long-lived shadps4_clone branch; no new graphics pipelines are admitted
-          Driveclub CUSA00003: every graphics pipeline that already passes SafeGPU admission uses the original guest fragment shader and original fragment buffers/images/samplers instead of the flat replacement path
-          Admission boundary: BUILD 12 strict actual Vulkan depth/stencil attachment rejection remains unchanged for ordinary candidates
-          Proven native depth set: BUILD 11's 110 exact Driveclub native-safe hashes remain unchanged
+          SafeGPU: Build 15 is a one-axis BUILD 14 continuation on the long-lived shadps4_clone branch
+          Driveclub CUSA00003: restore BUILD 11's exact 110 empirically native-safe depth hashes after BUILD 12 changed has_stencil semantics from test-enable state to actual attachment presence
+          Driveclub proven-depth rule: exact DriveclubNativeSafeHashes require depth but no longer require the actual stencil attachment to be absent; this restores the D32SfloatS8Uint members already proven stable
+          Unknown depth/stencil candidates: still rejected by BUILD 12 strict actual Vulkan depth/stencil attachment policy
+          Fragment/resources: BUILD 14 native guest fragment shaders and original fragment buffers/images/samplers retained for admitted Driveclub pipelines
           Descriptor delivery: BUILD 10 regular descriptor-set path retained; VK_KHR_push_descriptor remains disabled in SafeGPU
           Bloodborne CUSA03173 BUILD 11 quarantine retained: 0x41ce00fd9bac4b92
           DOAX3 CUSA04555 BUILD 11 quarantine retained: 0xae5a792de45aaf76
@@ -166,7 +171,7 @@ jobs:
           Persistent diagnostic: BUILD 11 last-submitted graphics pipeline tracking retained unchanged
           NullGPU: preserved and takes precedence
           Compute: skipped in SafeGPU before compute shader/pipeline creation
-          Source: exact BUILD 14 transform is included as BUILD14-SOURCE.ps1
+          Source: exact BUILD 15 transform is included as BUILD15-SOURCE.ps1
           "@ | Out-File -Encoding utf8 (Join-Path $output 'BUILD-IDENTITY.txt')
 
       - name: Upload artifact
